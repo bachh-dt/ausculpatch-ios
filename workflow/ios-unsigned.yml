@@ -1,0 +1,71 @@
+# Builds an unsigned AusculPatch.ipa on a GitHub-hosted Mac.
+# Sign and install it from Windows with Sideloadly (see README, "Free build").
+name: iOS unsigned build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install JavaScript packages
+        run: npm ci
+
+      - name: Run parity tests
+        run: npm test
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Generate the native iOS project
+        run: npx expo prebuild --platform ios --clean --no-install
+        env:
+          CI: 1
+
+      - name: Install CocoaPods
+        working-directory: ios
+        run: pod install
+
+      - name: Build the app without signing
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -workspace ios/AusculPatch.xcworkspace \
+            -scheme AusculPatch \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build | tail -n 200
+
+      - name: Package the .ipa
+        run: |
+          APP=build/Build/Products/Release-iphoneos/AusculPatch.app
+          test -d "$APP"
+          mkdir -p out/Payload
+          cp -R "$APP" out/Payload/
+          cd out
+          zip -qry AusculPatch-unsigned.ipa Payload
+          ls -lh AusculPatch-unsigned.ipa
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AusculPatch-unsigned-ipa
+          path: out/AusculPatch-unsigned.ipa
+          retention-days: 30
