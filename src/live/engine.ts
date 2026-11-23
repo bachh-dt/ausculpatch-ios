@@ -15,7 +15,9 @@ import { Vitals } from './clinical';
 import { ecgQuality, EcgQuality, heartSoundQuality, PoorContactTimer, Quality, UNKNOWN } from '../dsp/quality';
 import { FallDetector, FallEvent, StepCounter } from '../dsp/motion';
 import { history, notifyFall, notifyReattach, settings } from '../app/services';
-import { LiveListener, WavRecorder } from '../audio/audio';
+import { LiveListener, playTestTone, WavRecorder } from '../audio/audio';
+import { analyzeCardiac, CardiacResult } from '../dsp/cardiac';
+import { FallCheck } from '../dsp/motion';
 import { recordings } from '../storage/recordings';
 import { newFile, stampedName } from '../storage/files';
 
@@ -37,6 +39,9 @@ export interface EngineState {
   fall: PendingFall | null;
   listening: boolean;
   recording: { active: boolean; startedAt: number; seconds: number };
+  science: CardiacResult | null;
+  motion: { peakG: number; imuHz: number; lastCheck: FallCheck | null };
+  audio: { buffers: number; underruns: number };
 }
 
 type Listener = () => void;
@@ -52,7 +57,14 @@ class LiveEngine {
     fall: null,
     listening: false,
     recording: { active: false, startedAt: 0, seconds: 0 },
+    science: null,
+    motion: { peakG: 0, imuHz: 0, lastCheck: null },
+    audio: { buffers: 0, underruns: 0 },
   };
+  /** Screens that need the cardiac analysis register here, so it only runs while shown. */
+  private scienceUsers = 0;
+  private lastScience = 0;
+  private lastMotionReport = 0;
   frame = 0;
 
   private listeners = new Set<Listener>();
@@ -104,6 +116,7 @@ class LiveEngine {
     this.falls.sensitivity = s.fallSensitivity;
     this.poorTimer.delayS = s.reattachDelayS;
     this.listener.volume = s.listenVolume;
+    this.listener.boost = s.listenBand === 'wide';
     if (s.traceFps !== this.fps) {
       this.fps = s.traceFps;
       if (this.timer) clearInterval(this.timer);
@@ -124,6 +137,10 @@ class LiveEngine {
       if (now - this.lastVitals >= 2000) {
         this.lastVitals = now;
         this.updateVitals(now);
+      }
+      if (this.scienceUsers > 0 && now - this.lastScience >= 2000) {
+        this.lastScience = now;
+        this.updateScience();
       }
       if (this.wav) {
         const seconds = Math.floor(this.wav.seconds);
@@ -158,7 +175,13 @@ class LiveEngine {
       history.live.addSteps(now, counted.length);
       this.set({ stepsToday: history.stepsToday() });
     }
-    for (const f of this.falls.process(t, x, y, z, fs)) {
+    const fallsNow = this.falls.process(t, x, y, z, fs);
+    if (now - this.lastMotionReport >= 1000 || fallsNow.length) {
+      this.lastMotionReport = now;
+      this.set({ motion: { peakG: this.falls.recentPeakG, imuHz: fs, lastCheck: this.falls.lastCheck } });
+      if (this.listener.active) this.set({ audio: { ...this.listener.stats } });
+    }
+    for (const f of fallsNow) {
       // The detector judges 6 s after the impact; date the event at the impact.
       const latest = buf.latestTimeS ?? f.t;
       const epochMs = now - Math.max(0, latest - f.t) * 1000;
@@ -222,7 +245,55 @@ class LiveEngine {
     this.set({ vitals, vitalsAt: now });
   }
 
+  private updateScience(): void {
+    const s = settings.get();
+    const c = session.clinical;
+    const W = 30;
+    const [et, ev] = c.ecgRawMv.snapshot(W);
+    const aco = session.buffers.channels[P.CHANNEL_ACOUSTIC];
+    const [at, av] = aco.snapshot(W);
+    const imu = session.buffers.channels[P.CHANNEL_IMU];
+    const [it, ix] = imu.snapshot(W, 0);
+    const [, iy] = imu.snapshot(W, 1);
+    const [, iz] = imu.snapshot(W, 2);
+    const imuFs = imu.timestampRateHz(5) || session.state.rates.IMU || 0;
+    try {
+      const science = analyzeCardiac({
+        ecg: { t: et, v: ev, fs: c.rate('ECG') },
+        pcg: at.length ? { t: at, v: av, fs: c.rate('ACO') } : null,
+        scg: it.length ? { t: it, x: ix, y: iy, z: iz, fs: imuFs } : null,
+        ecgBand: s.ecgBand,
+        pcgBand: s.heartBand,
+        axis: s.scgAxis,
+      });
+      this.set({ science });
+    } catch (e) {
+      this.set({ science: null });
+      session.log.push(`Science analysis failed: ${String((e as Error).message ?? e)}`);
+    }
+  }
+
   // ------------------------------------------------------------- actions --
+  /** Call from a screen's effect; returns the cleanup. */
+  useScience(): () => void {
+    this.scienceUsers++;
+    this.lastScience = 0;
+    return () => {
+      this.scienceUsers = Math.max(0, this.scienceUsers - 1);
+    };
+  }
+
+  async testTone(): Promise<void> {
+    await playTestTone();
+  }
+
+  /** Shows the fall alert and sends the notification, without a fall. */
+  testFallAlert(): void {
+    const epochMs = Date.now();
+    this.set({ fall: { t: 0, impactG: 0, angleDeg: 0, stillnessG: 0, epochMs, heartRate: this.state.vitals.heartRate } });
+    void notifyFall(new Date(epochMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' (test)');
+  }
+
   snoozeReattach(minutes: number): void {
     this.snoozeUntil = Date.now() + minutes * 60000;
     this.set({ reattach: false });

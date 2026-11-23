@@ -93,11 +93,28 @@ export interface FallEvent {
   stillnessG: number;
 }
 
+/** Why the last impact was or was not called a fall (shown under Developer > Motion). */
+export interface FallCheck extends FallEvent {
+  fall: boolean;
+  freeFall: boolean;
+  reason: string;
+}
+
+/**
+ * Thresholds per sensitivity. The BMI270 range on the patch may be as low as
+ * +/-2 g per axis, so a real impact can read under 2.5 g; normal starts at 1.8 g.
+ * A brief free fall (|a| well under 1 g) just before the impact lowers the
+ * impact needed by 20%.
+ */
 export const FALL_PROFILES: Record<FallSensitivity, { impactG: number; angleDeg: number; stillG: number }> = {
-  low: { impactG: 3.0, angleDeg: 50, stillG: 0.1 },
-  normal: { impactG: 2.5, angleDeg: 45, stillG: 0.12 },
-  high: { impactG: 2.0, angleDeg: 35, stillG: 0.15 },
+  low: { impactG: 2.2, angleDeg: 45, stillG: 0.2 },
+  normal: { impactG: 1.8, angleDeg: 35, stillG: 0.3 },
+  high: { impactG: 1.5, angleDeg: 30, stillG: 0.45 },
 };
+/** Beyond this change of angle the patch is lying on its side or back; movement afterwards does not cancel the fall. */
+export const CLEAR_ANGLE_DEG = 60;
+const FREE_FALL_G = 0.55;
+const FREE_FALL_MIN_S = 0.06;
 const PRE_S: [number, number] = [-3, -1];
 const POST_S: [number, number] = [1, 6];
 const REFRACTORY_S = 30;
@@ -107,8 +124,14 @@ const SLOW_HZ = 50;
 export class FallDetector {
   private slow: { t: number; x: number; y: number; z: number; m: number }[] = [];
   private acc = { n: 0, x: 0, y: 0, z: 0, t0: 0 };
-  private candidate: { t: number; peak: number } | null = null;
+  private candidate: { t: number; peak: number; freeFall: boolean } | null = null;
   private lastFall = -Infinity;
+  private freeFallStart: number | null = null;
+  private lastFreeFallEnd = -Infinity;
+  /** Largest |a| in the last few seconds, for the Motion readout. */
+  recentPeakG = 0;
+  private recentPeakT = -Infinity;
+  lastCheck: FallCheck | null = null;
 
   constructor(public sensitivity: FallSensitivity = 'normal') {}
 
@@ -116,6 +139,7 @@ export class FallDetector {
     this.slow = [];
     this.acc = { n: 0, x: 0, y: 0, z: 0, t0: 0 };
     this.candidate = null;
+    this.freeFallStart = null;
   }
 
   process(t: ArrayLike<number>, ax: ArrayLike<number>, ay: ArrayLike<number>, az: ArrayLike<number>, fs: number): FallEvent[] {
@@ -125,8 +149,21 @@ export class FallDetector {
     const block = Math.max(1, Math.round(fs / SLOW_HZ));
     for (let i = 0; i < t.length; i++) {
       const m = Math.sqrt(ax[i] * ax[i] + ay[i] * ay[i] + az[i] * az[i]);
-      if (m >= p.impactG && t[i] - this.lastFall > REFRACTORY_S) {
-        if (!this.candidate) this.candidate = { t: t[i], peak: m };
+      if (m > this.recentPeakG || t[i] - this.recentPeakT > 5) {
+        this.recentPeakG = m;
+        this.recentPeakT = t[i];
+      }
+      // Free fall: the patch briefly weighs much less than 1 g.
+      if (m < FREE_FALL_G) {
+        if (this.freeFallStart === null) this.freeFallStart = t[i];
+      } else if (this.freeFallStart !== null) {
+        if (t[i] - this.freeFallStart >= FREE_FALL_MIN_S) this.lastFreeFallEnd = t[i];
+        this.freeFallStart = null;
+      }
+      const freeFall = t[i] - this.lastFreeFallEnd < 1;
+      const needed = freeFall ? 0.8 * p.impactG : p.impactG;
+      if (m >= needed && t[i] - this.lastFall > REFRACTORY_S) {
+        if (!this.candidate) this.candidate = { t: t[i], peak: m, freeFall };
         else if (t[i] - this.candidate.t < 0.5) this.candidate.peak = Math.max(this.candidate.peak, m);
       }
       if (this.acc.n === 0) this.acc.t0 = t[i];
@@ -142,22 +179,26 @@ export class FallDetector {
         while (this.slow.length && this.slow[0].t < t[i] - HISTORY_S) this.slow.shift();
       }
       if (this.candidate && t[i] >= this.candidate.t + POST_S[1]) {
-        const ev = this.judge(this.candidate, p);
+        const check = this.judge(this.candidate, p);
         this.candidate = null;
-        if (ev) {
-          this.lastFall = ev.t;
-          out.push(ev);
+        if (check) {
+          this.lastCheck = check;
+          if (check.fall) {
+            this.lastFall = check.t;
+            out.push({ t: check.t, impactG: check.impactG, angleDeg: check.angleDeg, stillnessG: check.stillnessG });
+          }
         }
       }
     }
     return out;
   }
 
-  private judge(c: { t: number; peak: number }, p: { angleDeg: number; stillG: number }): FallEvent | null {
+  private judge(c: { t: number; peak: number; freeFall: boolean }, p: { angleDeg: number; stillG: number }): FallCheck | null {
     const window = (a: number, b: number) => this.slow.filter((s) => s.t >= c.t + a && s.t <= c.t + b);
     const pre = window(PRE_S[0], PRE_S[1]);
     const post = window(POST_S[0], POST_S[1]);
-    if (pre.length < 10 || post.length < 10) return null;
+    const base = { t: c.t, impactG: c.peak, freeFall: c.freeFall, angleDeg: 0, stillnessG: 0 };
+    if (pre.length < 10 || post.length < 10) return { ...base, fall: false, reason: 'not enough data around the impact' };
     const meanVec = (w: typeof pre) => {
       let x = 0, y = 0, z = 0;
       for (const s of w) {
@@ -172,7 +213,7 @@ export class FallDetector {
     const dot = a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
     const na = Math.hypot(a[0], a[1], a[2]);
     const nb = Math.hypot(b[0], b[1], b[2]);
-    if (na < 0.3 || nb < 0.3) return null;
+    if (na < 0.3 || nb < 0.3) return { ...base, fall: false, reason: 'no steady gravity reading' };
     const angle = (Math.acos(Math.max(-1, Math.min(1, dot / (na * nb)))) * 180) / Math.PI;
     let mm = 0;
     for (const s of post) mm += s.m;
@@ -180,7 +221,9 @@ export class FallDetector {
     let v = 0;
     for (const s of post) v += (s.m - mm) ** 2;
     const still = Math.sqrt(v / post.length);
-    if (angle < p.angleDeg || still > p.stillG) return null;
-    return { t: c.t, impactG: c.peak, angleDeg: angle, stillnessG: still };
+    const r = { ...base, angleDeg: angle, stillnessG: still };
+    if (angle < p.angleDeg) return { ...r, fall: false, reason: `body angle changed only ${Math.round(angle)}°` };
+    if (still > p.stillG && angle < CLEAR_ANGLE_DEG) return { ...r, fall: false, reason: 'kept moving afterwards' };
+    return { ...r, fall: true, reason: c.freeFall ? 'free fall, impact, new position' : 'impact, new position' };
   }
 }

@@ -238,6 +238,17 @@ export function HomeScreen({ go }: { go: (route: 'listen' | 'settings') => void 
             label="ECG"
           />
         </View>
+        <View style={{ gap: 4 }}>
+          <Text style={{ fontSize: 12, fontWeight: '700', color: colors.muted }}>● Breathing</Text>
+          <SignalTrace
+            source={() => session.clinical.breathOut}
+            windowS={Math.max(st.windowS, 30)}
+            width={traceWidth}
+            height={56}
+            color={colors.breath}
+            label="Breathing"
+          />
+        </View>
         <View style={{ flexDirection: 'row', gap: 10 }}>
           <BigButton label="Listen" icon={<SpeakerIcon size={20} color="#FFFFFF" />} onPress={() => go('listen')} style={{ flex: 1 }} />
           <BigButton

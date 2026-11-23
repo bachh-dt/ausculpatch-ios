@@ -126,3 +126,8 @@ export function RecordDot({ size = 16, color = '#C8283E', square = false }: P & 
     </Svg>
   );
 }
+export const PulseIcon = (p: P) => (
+  <Stroke {...p}>
+    <Path d="M3 12h4l3-8 4 16 3-8h4" />
+  </Stroke>
+);

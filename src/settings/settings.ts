@@ -17,10 +17,14 @@ export interface Settings {
   windowS: WindowS;
   heartBand: BandSetting;
   ecgBand: BandSetting;
+  /** Breathing band-pass low edge; 0 turns it into a low-pass at breathCutHz. */
+  breathLowHz: number;
   breathCutHz: number;
   breathOrder: number;
-  /** Listening uses the heart sound band, or a wider band that phone speakers reproduce better. */
+  /** 'heart': the heart band as is, for headphones. 'wide': wider band plus harmonics the speaker can play. */
   listenBand: 'heart' | 'wide';
+  /** IMU axis used for the seismocardiogram, or 'auto' for the one with the strongest beat. */
+  scgAxis: 'auto' | 'x' | 'y' | 'z';
   listenVolume: number; // 0..1
   traceFps: 15 | 30 | 60;
   showRaw: boolean;
@@ -38,9 +42,11 @@ export const DEFAULT_SETTINGS: Settings = {
   windowS: 10,
   heartBand: { lowHz: 25, highHz: 80, order: 4 },
   ecgBand: { lowHz: 1, highHz: 40, order: 2 },
+  breathLowHz: 0.1,
   breathCutHz: 0.5,
   breathOrder: 2,
   listenBand: 'heart',
+  scgAxis: 'auto',
   listenVolume: 0.8,
   traceFps: 30,
   showRaw: false,
@@ -61,6 +67,9 @@ export function ecgSpec(s: Settings): FilterSpec {
   return new FilterSpec('bandpass', s.ecgBand.order, s.ecgBand.lowHz, s.ecgBand.highHz);
 }
 export function breathSpec(s: Settings): FilterSpec {
+  if (s.breathLowHz > 0 && s.breathLowHz < s.breathCutHz) {
+    return new FilterSpec('bandpass', s.breathOrder, s.breathLowHz, s.breathCutHz);
+  }
   return new FilterSpec('lowpass', s.breathOrder, null, s.breathCutHz);
 }
 export function listenSpec(s: Settings): FilterSpec {
@@ -94,6 +103,10 @@ export function mergeSettings(stored: unknown): Settings {
   }
   if (![5, 10, 30].includes(out.windowS)) out.windowS = DEFAULT_SETTINGS.windowS;
   if (![15, 30, 60].includes(out.traceFps)) out.traceFps = DEFAULT_SETTINGS.traceFps;
+  if (!['auto', 'x', 'y', 'z'].includes(out.scgAxis)) out.scgAxis = 'auto';
+  if (!['heart', 'wide'].includes(out.listenBand)) out.listenBand = 'heart';
+  if (!['low', 'normal', 'high'].includes(out.fallSensitivity)) out.fallSensitivity = 'normal';
+  if (out.breathLowHz < 0 || out.breathLowHz >= out.breathCutHz) out.breathLowHz = 0;
   return out;
 }
 

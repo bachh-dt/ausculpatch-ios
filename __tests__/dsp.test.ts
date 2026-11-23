@@ -1,7 +1,7 @@
 import { StreamingFilter } from '../src/dsp/filters';
 import { ecgQuality, heartSoundQuality, PoorContactTimer } from '../src/dsp/quality';
 import { FallDetector, StepCounter } from '../src/dsp/motion';
-import { DEFAULT_SETTINGS, ecgSpec, heartSpec, mergeSettings } from '../src/settings/settings';
+import { breathSpec, DEFAULT_SETTINGS, ecgSpec, heartSpec, mergeSettings } from '../src/settings/settings';
 
 // Deterministic noise so the tests never flake.
 function rng(seed: number) {
@@ -61,6 +61,9 @@ describe('settings', () => {
     expect(DEFAULT_SETTINGS.heartBand).toEqual({ lowHz: 25, highHz: 80, order: 4 });
     expect(DEFAULT_SETTINGS.ecgBand).toEqual({ lowHz: 1, highHz: 40, order: 2 });
     expect(DEFAULT_SETTINGS.breathCutHz).toBe(0.5);
+    expect(DEFAULT_SETTINGS.breathLowHz).toBe(0.1);
+    expect(breathSpec(DEFAULT_SETTINGS).kind).toBe('bandpass');
+    expect(breathSpec({ ...DEFAULT_SETTINGS, breathLowHz: 0 }).kind).toBe('lowpass');
     expect(DEFAULT_SETTINGS.breathOrder).toBe(2);
   });
   test('merge keeps good values and drops bad ones', () => {
@@ -185,10 +188,33 @@ describe('fall detector', () => {
     });
     expect(new FallDetector('normal').process(d.t, d.x, d.y, d.z, IMU_FS)).toHaveLength(0);
   });
-  test('low sensitivity ignores a 2.2 g impact that high sensitivity catches', () => {
-    const hit = (t: number) => (Math.abs(t - 8) < 0.03 ? 1.2 : 0); // 1 g of gravity + 1.2 g = 2.2 g
+  test('low sensitivity ignores a 1.6 g impact that high sensitivity catches', () => {
+    const hit = (t: number) => (Math.abs(t - 8) < 0.03 ? 0.6 : 0); // 1 g of gravity + 0.6 g = 1.6 g
     const d = imu(20, (t) => (t < 8 ? [0, -1 - hit(t), 0] : [0, 0, 1 + hit(t)]));
     expect(new FallDetector('low').process(d.t, d.x, d.y, d.z, IMU_FS)).toHaveLength(0);
     expect(new FallDetector('high').process(d.t, d.x, d.y, d.z, IMU_FS)).toHaveLength(1);
+  });
+  test('normal catches a 2 g impact onto the back even if the person moves afterwards', () => {
+    const d = imu(20, (t) => (t < 8 ? [0, -1 - (Math.abs(t - 8) < 0.03 ? 1 : 0), 0] : [0.3 * Math.sin(6 * t), 0, 1]));
+    const fd = new FallDetector('normal');
+    expect(fd.process(d.t, d.x, d.y, d.z, IMU_FS)).toHaveLength(1);
+    expect(fd.lastCheck?.fall).toBe(true);
+  });
+  test('a free fall lowers the impact needed', () => {
+    const at = (t: number): [number, number, number] => {
+      if (t > 7.8 && t < 7.97) return [0, -0.2, 0]; // falling
+      if (Math.abs(t - 8) < 0.03) return [0, -1.5, 0]; // 1.5 g, under the normal 1.8 g
+      return t < 8 ? [0, -1, 0] : [0, 0, 1];
+    };
+    const d = imu(20, at);
+    const fd = new FallDetector('normal');
+    expect(fd.process(d.t, d.x, d.y, d.z, IMU_FS)).toHaveLength(1);
+    expect(fd.lastCheck?.freeFall).toBe(true);
+  });
+  test('sitting down hard but upright is not a fall, and says why', () => {
+    const d = imu(20, (t) => [0, -1 - (Math.abs(t - 8) < 0.03 ? 1.2 : 0), 0]);
+    const fd = new FallDetector('high');
+    expect(fd.process(d.t, d.x, d.y, d.z, IMU_FS)).toHaveLength(0);
+    expect(fd.lastCheck?.reason).toMatch(/angle/);
   });
 });

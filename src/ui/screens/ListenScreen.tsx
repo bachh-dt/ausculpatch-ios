@@ -28,6 +28,15 @@ export function ListenScreen({ back, openRecordings }: { back: () => void; openR
   const e = useEngine();
   const st = useSettings();
   const [busy, setBusy] = useState(false);
+  const [toneBusy, setToneBusy] = useState(false);
+  const testTone = async () => {
+    setToneBusy(true);
+    try {
+      await engine.testTone();
+    } finally {
+      setToneBusy(false);
+    }
+  };
   const { width } = useWindowDimensions();
   const traceWidth = width - 2 * space.xl - 2 * space.l;
   const volume = VOLUMES.reduce((best, v) => (Math.abs(v.value - st.listenVolume) < Math.abs(best.value - st.listenVolume) ? v : best)).value;
@@ -99,18 +108,23 @@ export function ListenScreen({ back, openRecordings }: { back: () => void; openR
         </Text>
         <Text style={[font.small, { textAlign: 'center' }]}>
           {st.listenBand === 'heart'
-            ? `Plays the ${st.heartBand.lowHz} to ${st.heartBand.highHz} Hz heart band. Phone speakers barely reproduce sound this low, so headphones work much better.`
-            : 'Plays a wider band (25 to 400 Hz) that the phone speaker can reproduce. Headphones still sound best.'}
+            ? `Plays the ${st.heartBand.lowHz} to ${st.heartBand.highHz} Hz heart band as it is. The iPhone speaker cannot play sound this low, so this mode needs headphones.`
+            : 'Plays 25 to 400 Hz and adds harmonics of the heart sounds so the iPhone speaker can play them. It sounds less natural than headphones.'}
         </Text>
         <Segmented
           label="Listening band"
           options={[
-            { value: 'heart', label: 'Heart band' },
-            { value: 'wide', label: 'Wider, for speaker' },
+            { value: 'heart', label: 'Headphones' },
+            { value: 'wide', label: 'Speaker boost' },
           ]}
           value={st.listenBand}
           onChange={(v) => settings.update({ listenBand: v as 'heart' | 'wide' })}
         />
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+          <BigButton label="Test sound" kind="soft" busy={toneBusy} onPress={testTone} style={{ minHeight: 38 }} />
+          {e.listening ? <Text style={font.small}>{`${e.audio.buffers} buffers · ${e.audio.underruns} gaps`}</Text> : null}
+        </View>
+        <Text style={[font.small, { textAlign: 'center' }]}>No sound at all? Tap Test sound. If the tone is silent too, turn up the volume with the side buttons (media volume, not ringer).</Text>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
           <Text style={font.label}>Volume</Text>
           <Segmented label="Volume" options={VOLUMES} value={volume} onChange={(v) => settings.update({ listenVolume: v })} />

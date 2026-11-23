@@ -141,9 +141,9 @@ export function Segmented<T extends string | number>({
             onPress={() => onChange(o.value)}
             style={{
               flex: stretch ? 1 : undefined,
-              minWidth: 44,
+              minWidth: stretch ? 0 : 44,
               height: 34,
-              paddingHorizontal: 12,
+              paddingHorizontal: stretch ? 4 : 12,
               borderRadius: radius.pill,
               alignItems: 'center',
               justifyContent: 'center',
@@ -154,7 +154,9 @@ export function Segmented<T extends string | number>({
               shadowOffset: { width: 0, height: 1 },
             }}
           >
-            <Text style={{ fontSize: 13, fontWeight: '700', color: on ? (onWhite ? colors.accentText : '#FFFFFF') : colors.muted }}>{o.label}</Text>
+            <Text numberOfLines={1} adjustsFontSizeToFit style={{ fontSize: 13, fontWeight: '700', color: on ? (onWhite ? colors.accentText : '#FFFFFF') : colors.muted }}>
+              {o.label}
+            </Text>
           </Pressable>
         );
       })}

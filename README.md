@@ -2,14 +2,14 @@
 
 An iPhone app for the AusculPatch, built with Expo (React Native).
 
-The app has four tabs. Home shows heart rate, breathing rate, today's steps and live heart-sound and ECG traces, with a 5, 10 or 30 s window and a contact badge on each trace. Listen plays the heart sound live through the speaker or headphones and records it. Trends charts heart rate, breathing rate and steps by day, week or month. Sounds lists recordings with a player and a Share button. Settings covers the patch, fall alerts, the step goal and history export. Settings › Developer holds the technical controls: sampling rates, filter tuning, signal-quality thresholds, the log and the raw files.
+The app has five tabs. Home shows heart rate, breathing rate, today's steps and live heart-sound, ECG and breathing traces, with a 5, 10 or 30 s window and a contact badge on each trace. Listen plays the heart sound live through the speaker or headphones and records it. Trends charts heart rate, breathing rate and steps by day, week or month. Science overlays ECG, heart sound and the seismocardiogram (SCG, chest vibration from the IMU), averages the beats on the ECG R peak, and measures the timing between them: R to S1, R to S2, S1 to S2, R to aortic opening (a pre-ejection period proxy), aortic opening to closure (an ejection time proxy), their ratio, and heart-rate variability (`src/dsp/cardiac.ts`). Sounds lists recordings with a player and a Share button. Settings covers the patch, fall alerts, the step goal and history export. Settings › Developer holds the technical controls: sampling rates, filter tuning, signal-quality thresholds, a Motion page for the accelerometer and fall detector, the log and the raw files.
 
-Default filters are a 25 to 80 Hz order-4 band-pass for heart sound, a 1 to 40 Hz order-2 band-pass for ECG, and a 0.5 Hz order-2 low-pass for breathing (taken from the heart-sound envelope). All three can be changed under Developer › Filters, and the changes are kept.
+Default filters are a 25 to 80 Hz order-4 band-pass for heart sound, a 1 to 40 Hz order-2 band-pass for ECG, and a 0.1 to 0.5 Hz order-2 band-pass for breathing (taken from the heart-sound envelope; set the low cut to 0 for a plain low-pass). All three can be changed under Developer › Filters, and the changes are kept.
 
 What happens in the background:
 
 - Every second the app scores the ECG and heart-sound quality (`src/dsp/quality.ts`). If either stays poor for 10 s, a sheet asks you to reattach the patch, and heart rate and breathing rate are hidden until the signals recover.
-- Steps and falls come from the patch's accelerometer (`src/dsp/motion.ts`). A fall is a hard impact followed by 5 s of lying still at a clearly different angle. It raises a notification on the phone only. The sensitivity is set in Settings.
+- Steps and falls come from the patch's accelerometer (`src/dsp/motion.ts`). A fall is an impact (1.8 g at normal sensitivity, 20% less after a brief free fall) followed by a change of body angle of at least 35°, and either 5 s without much movement or a turn of more than 60°. It raises a notification on the phone only. Developer › Motion shows the largest recent acceleration and why the last impact was or was not called a fall.
 - Heart rate, breathing rate and steps are saved per minute in SQLite (`src/history`). Downloads from the patch are analysed the same way and added to Trends, using the patch's own clock.
 
 The CSV files are the same format the desktop tools write (`Timestamp(us),Device_Index,DataType,Value..Value6,Epoch_us`), so files from the phone open in the workbench.
@@ -134,7 +134,7 @@ The first version filtered the signals inside the screen's render function and c
 
 1. Open the app and tap Connect patch on Home, then tap the patch in the list.
 2. The traces start within a second or two. Heart rate needs about 2 s of clean ECG and breathing rate about 12 s of signal; until then the tiles say Measuring.
-3. Tap Listen to hear the heart sound. The 25 to 80 Hz heart band is too low for the phone's speaker, so use headphones, or switch the listening band to "Wider, for speaker" (25 to 400 Hz).
+3. Tap Listen to hear the heart sound. "Headphones" plays the 25 to 80 Hz heart band as it is, which the iPhone speaker cannot reproduce. "Speaker boost" plays 25 to 400 Hz and adds harmonics so the speaker can play it. Test sound plays a 440 Hz tone to check the audio output itself.
 4. Tap Record on Home or Listen. The recording saves an 8 kHz WAV of the heart sound plus a CSV of every sample, and appears under Sounds.
 5. To download what the patch stored, go to Settings › Recording on the patch and tap Download to phone. Keep the phone near the patch. If the link drops, tap Resume download. When it finishes, the minutes it covers appear in Trends.
 6. Share any recording from Sounds, or any raw file from Developer › Files.
@@ -146,7 +146,8 @@ The patch schedule on this app always saves bursts to the patch's memory, as the
 The protocol, download, signal-processing, quality, motion, history and audio-buffer code is tested in Jest. Everything that needs an iPhone has only been type-checked and bundled. Check these on the first build:
 
 - Connection and live streaming at the default rates (acoustic 2000 Hz), and whether the traces stay smooth at 4000 Hz.
-- Live listening and WAV playback (`react-native-audio-api`), including how much delay the listening has.
+- Live listening and WAV playback (`react-native-audio-api`), including how much delay the listening has. Listen shows how many buffers played and how often the stream ran dry.
+- The Science timings on a real chest. The SCG peaks used for aortic opening and closure vary with patch position, so check that the AO and AC marks sit on clear peaks of the averaged SCG before trusting R→AO and AO→AC.
 - Whether the quality thresholds suit the real patch. Watch the scores under Developer › Filters while you press, lift and rub the patch, and adjust "Good above" if the reminder comes too early or too late.
 - Step counts while walking and the fall detector, with a few controlled drops onto a cushion. The thresholds come from synthetic tests, not from patch data.
 - Fall notifications on the lock screen (allow notifications when asked).

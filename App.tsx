@@ -5,7 +5,8 @@ import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { engine } from './src/live/engine';
 import { ensureNotificationPermission, history, settings } from './src/app/services';
 import { TabBar } from './src/ui/kit';
-import { HomeIcon, SlidersIcon, TrendsIcon, WaveIcon } from './src/ui/icons';
+import { HomeIcon, PulseIcon, SlidersIcon, TrendsIcon, WaveIcon } from './src/ui/icons';
+import { ScienceScreen } from './src/ui/screens/ScienceScreen';
 import { HomeScreen } from './src/ui/screens/HomeScreen';
 import { ListenScreen } from './src/ui/screens/ListenScreen';
 import { TrendsScreen } from './src/ui/screens/TrendsScreen';
@@ -16,12 +17,13 @@ import { FallAlert, ReattachSheet } from './src/ui/Overlays';
 import { colors } from './src/ui/theme';
 import { AppState } from 'react-native';
 
-type Tab = 'home' | 'trends' | 'sounds' | 'settings';
+type Tab = 'home' | 'trends' | 'science' | 'sounds' | 'settings';
 type Sub = null | 'listen' | 'developer' | 'download';
 
 const TABS = [
   { key: 'home', label: 'Home', icon: (c: string) => <HomeIcon size={20} color={c} /> },
   { key: 'trends', label: 'Trends', icon: (c: string) => <TrendsIcon size={20} color={c} /> },
+  { key: 'science', label: 'Science', icon: (c: string) => <PulseIcon size={20} color={c} /> },
   { key: 'sounds', label: 'Sounds', icon: (c: string) => <WaveIcon size={20} color={c} /> },
   { key: 'settings', label: 'Settings', icon: (c: string) => <SlidersIcon size={20} color={c} /> },
 ];
@@ -51,6 +53,7 @@ export default function App() {
   else if (sub === 'download') content = <PatchRecordingScreen back={() => setSub(null)} />;
   else if (tab === 'home') content = <HomeScreen go={(r) => (r === 'settings' ? openTab('settings') : setSub('listen'))} />;
   else if (tab === 'trends') content = <TrendsScreen />;
+  else if (tab === 'science') content = <ScienceScreen />;
   else if (tab === 'sounds') content = <SoundsScreen />;
   else content = <SettingsScreen go={(r) => setSub(r)} />;
 
