@@ -24,3 +24,35 @@ export function bytes(n: number): string {
   if (n >= 1e3) return `${(n / 1e3).toFixed(0)} kB`;
   return `${n} B`;
 }
+
+/** Rough charge from a single-cell Li-ion voltage under light load. */
+export function batteryPercent(v: number | null): number | null {
+  if (v === null || !Number.isFinite(v)) return null;
+  const pts: [number, number][] = [[3.3, 0], [3.6, 10], [3.7, 30], [3.8, 50], [3.95, 75], [4.1, 92], [4.2, 100]];
+  if (v <= pts[0][0]) return 0;
+  for (let i = 1; i < pts.length; i++) {
+    if (v <= pts[i][0]) {
+      const [v0, p0] = pts[i - 1];
+      const [v1, p1] = pts[i];
+      return Math.round(p0 + ((v - v0) / (v1 - v0)) * (p1 - p0));
+    }
+  }
+  return 100;
+}
+
+export function greeting(d = new Date()): string {
+  const h = d.getHours();
+  return h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
+}
+
+export function clock(ms: number): string {
+  return new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+export function mmss(seconds: number): string {
+  const s = Math.max(0, Math.round(seconds));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const r = s % 60;
+  return h ? `${h}:${String(m).padStart(2, '0')}:${String(r).padStart(2, '0')}` : `${m}:${String(r).padStart(2, '0')}`;
+}

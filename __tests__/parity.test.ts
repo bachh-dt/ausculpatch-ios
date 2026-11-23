@@ -13,7 +13,13 @@ import { DumpAssembler, MemorySink } from '../src/protocol/dump';
 import { bytesSource, FlashImageReader } from '../src/protocol/flashlog';
 import { batchRows, CSV_HEADER, flashSampleRow } from '../src/protocol/csv';
 import { butterSos, findPeaks, sosfilt, sosfiltZi } from '../src/dsp/signal';
-import { BlockMeanDecimator, BREATHING_FILTER, ECG_FILTER, HEART_SOUND_FILTER, StreamingFilter } from '../src/dsp/filters';
+import {
+  BlockMeanDecimator,
+  HOST_BREATHING_FILTER as BREATHING_FILTER,
+  HOST_ECG_FILTER as ECG_FILTER,
+  HOST_HEART_SOUND_FILTER as HEART_SOUND_FILTER,
+  StreamingFilter,
+} from '../src/dsp/filters';
 import { estimateHeartRate, estimateRateFromWave, RR_MAX_BPM, RR_MIN_BPM } from '../src/dsp/vitals';
 import { base64ToBytes, bytesToBase64, utf8Decode } from '../src/util/base64';
 

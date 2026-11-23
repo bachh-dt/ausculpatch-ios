@@ -30,7 +30,7 @@ export function DeviceScreen() {
     <ScrollView contentContainerStyle={{ padding: space.m }}>
       {!s.connected ? (
         <Card>
-          <Text style={styles.body}>Connect a patch on the Monitor tab first.</Text>
+          <Text style={styles.body}>Connect the patch on the Home tab first.</Text>
         </Card>
       ) : null}
 

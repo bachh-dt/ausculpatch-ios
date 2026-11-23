@@ -18,3 +18,39 @@ export function useTicker(ms: number, active = true): number {
   }, [ms, active]);
   return tick;
 }
+
+import { engine, EngineState } from '../live/engine';
+import { history, settings } from '../app/services';
+import { Settings } from '../settings/settings';
+import { recordings } from '../storage/recordings';
+
+export function useEngine(): EngineState {
+  return useSyncExternalStore(
+    (fn) => engine.subscribe(fn),
+    () => engine.state,
+  );
+}
+
+export function useSettings(): Settings {
+  return useSyncExternalStore(
+    (fn) => settings.subscribe(fn),
+    () => settings.get(),
+  );
+}
+
+/** Changes whenever history is written, so charts can recompute. */
+export function useHistoryVersion(): number {
+  return useSyncExternalStore(
+    (fn) => history.subscribe(fn),
+    () => history.version,
+  );
+}
+
+let recordingsVersion = 0;
+recordings.subscribe(() => recordingsVersion++);
+export function useRecordingsVersion(): number {
+  return useSyncExternalStore(
+    (fn) => recordings.subscribe(fn),
+    () => recordingsVersion,
+  );
+}

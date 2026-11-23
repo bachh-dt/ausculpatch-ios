@@ -1,19 +1,45 @@
+/** Light theme from the approved mockups: blue-grey ground, white cards, one blue accent, coral for heart. */
 export const colors = {
-  bg: '#0f1418',
-  surface: '#182026',
-  raised: '#1f2a31',
-  grid: '#2c3a43',
-  text: '#e6edf0',
-  muted: '#8a9aa4',
-  ok: '#66bb6a',
-  warn: '#ffb74d',
-  danger: '#ef5350',
-  accent: '#4fc3f7',
-  heart: '#ffb74d',
-  ecg: '#66bb6a',
-  breath: '#80cbc4',
-  temp: '#f48fb1',
-  batt: '#b0bec5',
+  // Base
+  bg: '#EEF3FB',
+  surface: '#FFFFFF',
+  raised: '#F3F6FB',
+  grid: '#E2E8F2',
+  line: '#EEF2F8',
+  text: '#0F172A',
+  muted: '#5B6475',
+  faint: '#94A3B8',
+  // Accent
+  accent: '#2563EB',
+  accentText: '#1D4ED8',
+  accentSoft: '#E6EEFE',
+  ink: '#0F172A',
+  // Signals
+  heart: '#C8283E',
+  heartSoft: '#FDECEE',
+  ecg: '#2563EB',
+  breath: '#2563EB',
+  temp: '#B4537A',
+  batt: '#64748B',
+  // States
+  ok: '#166534',
+  okSoft: '#DCFCE7',
+  warn: '#9A3412',
+  warnSoft: '#FFEDD5',
+  danger: '#991B1B',
+  dangerSoft: '#FEE2E2',
+  alert: '#C2410C',
+  alertSoft: '#FFF1E6',
+  overlay: 'rgba(15, 23, 42, 0.55)',
 };
 
-export const space = { xs: 4, s: 8, m: 12, l: 16, xl: 24 };
+export const space = { xs: 4, s: 8, m: 12, l: 16, xl: 20, xxl: 24 };
+export const radius = { card: 22, button: 16, pill: 999 };
+export const font = {
+  title: { fontSize: 28, fontWeight: '800' as const, letterSpacing: -0.5, color: colors.text },
+  heading: { fontSize: 18, fontWeight: '700' as const, color: colors.text },
+  big: { fontSize: 40, fontWeight: '800' as const, letterSpacing: -1, color: colors.text },
+  label: { fontSize: 14, fontWeight: '600' as const, color: colors.muted },
+  small: { fontSize: 12, color: colors.muted },
+  body: { fontSize: 15, color: colors.text },
+};

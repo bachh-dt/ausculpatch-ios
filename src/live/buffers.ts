@@ -193,6 +193,42 @@ export class ChannelBuffer {
     return [t, v];
   }
 
+  /**
+   * Min/max of every pixel column between tStart and tEnd, written into the
+   * caller's arrays (no allocation). Columns with no sample hold +/-Infinity.
+   * This is what keeps a 4 kHz trace cheap to draw 30 times a second.
+   */
+  reduceColumns(tStart: number, tEnd: number, mins: Float64Array, maxs: Float64Array, series = 0): number {
+    const cols = mins.length;
+    mins.fill(Infinity);
+    maxs.fill(-Infinity);
+    const n = this.count;
+    if (!n || cols === 0) return 0;
+    const first = n < this.capacity ? 0 : this.head;
+    const cap = this.capacity;
+    let lo = 0, hi = n;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (this.t[(first + mid) % cap] < tStart) lo = mid + 1;
+      else hi = mid;
+    }
+    const scale = (cols - 1) / (tEnd - tStart || 1);
+    const w = this.width;
+    let used = 0;
+    for (let i = lo; i < n; i++) {
+      const idx = (first + i) % cap;
+      const t = this.t[idx];
+      if (t > tEnd) break;
+      const col = ((t - tStart) * scale) | 0;
+      const v = this.v[idx * w + series];
+      if (v !== v) continue; // NaN
+      if (v < mins[col]) mins[col] = v;
+      if (v > maxs[col]) maxs[col] = v;
+      used++;
+    }
+    return used;
+  }
+
   snapshot(windowS = DEFAULT_WINDOW_S, series = 0): [Float64Array, Float64Array] {
     const latest = this.latestTimeS;
     if (latest === null) return [new Float64Array(0), new Float64Array(0)];

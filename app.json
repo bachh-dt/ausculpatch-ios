@@ -5,7 +5,7 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "dark",
+    "userInterfaceStyle": "light",
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "au.edu.unsw.ausculpatch",
@@ -18,7 +18,7 @@
     "android": {
       "package": "au.edu.unsw.ausculpatch",
       "adaptiveIcon": {
-        "backgroundColor": "#0f1418",
+        "backgroundColor": "#EEF3FB",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
@@ -34,7 +34,20 @@
           ],
           "bluetoothAlwaysPermission": "AusculPatch uses Bluetooth to connect to the patch, stream its signals and download recordings."
         }
-      ]
+      ],
+      [
+        "react-native-audio-api",
+        {
+          "iosBackgroundMode": true,
+          "androidForegroundService": false,
+          "enableFFmpeg": false
+        }
+      ],
+      [
+        "expo-notifications",
+        {}
+      ],
+      "expo-sqlite"
     ]
   }
 }

@@ -40,8 +40,14 @@ export class FilterSpec {
   }
 }
 
-export const HEART_SOUND_FILTER = new FilterSpec('bandpass', 4, 20, 100);
-export const ECG_FILTER = new FilterSpec('bandpass', 2, 0.1, 40);
+/** The desktop host's filters. The parity tests check the port against these. */
+export const HOST_HEART_SOUND_FILTER = new FilterSpec('bandpass', 4, 20, 100);
+export const HOST_ECG_FILTER = new FilterSpec('bandpass', 2, 0.1, 40);
+export const HOST_BREATHING_FILTER = new FilterSpec('lowpass', 2, null, 0.5);
+
+/** The app's defaults. Users change them in Settings > Developer > Filters. */
+export const HEART_SOUND_FILTER = new FilterSpec('bandpass', 4, 25, 80);
+export const ECG_FILTER = new FilterSpec('bandpass', 2, 1, 40);
 export const BREATHING_FILTER = new FilterSpec('lowpass', 2, null, 0.5);
 
 export class StreamingFilter {

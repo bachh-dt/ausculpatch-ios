@@ -150,7 +150,7 @@ export function RecordingScreen() {
     <ScrollView contentContainerStyle={{ padding: space.m }} keyboardShouldPersistTaps="handled">
       {!s.connected ? (
         <Card>
-          <Text style={styles.body}>Connect a patch on the Monitor tab first.</Text>
+          <Text style={styles.body}>Connect the patch on the Home tab first.</Text>
         </Card>
       ) : null}
 
@@ -244,20 +244,10 @@ export function RecordingScreen() {
         </Card>
       ) : null}
 
-      <Card title="RECORD THE LIVE STREAM ON THE PHONE">
+      <Card title="LIVE RECORDING">
         <Text style={styles.note}>
-          Saves what is streaming right now to a CSV on the phone, in the same format as the desktop app. Only works while the phone is in range.
+          To record what is streaming right now, use Record on the Home or Listen screen. It saves the heart sound as audio and every sample as a CSV.
         </Text>
-        {s.phoneRecording.active ? (
-          <Text style={[styles.body, { marginTop: space.s }]}>{`${s.phoneRecording.name}: ${s.phoneRecording.rows.toLocaleString()} samples`}</Text>
-        ) : null}
-        <View style={styles.buttonRow}>
-          {s.phoneRecording.active ? (
-            <Button label="Stop and save" kind="primary" onPress={() => session.stopPhoneRecording()} />
-          ) : (
-            <Button label="Start" disabled={!s.connected} onPress={() => session.startPhoneRecording()} />
-          )}
-        </View>
       </Card>
     </ScrollView>
   );

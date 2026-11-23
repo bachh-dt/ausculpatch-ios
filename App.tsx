@@ -1,79 +1,74 @@
-import React, { useState } from 'react';
-import { Pressable, Text, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
-import { MonitorScreen } from './src/ui/screens/MonitorScreen';
-import { RecordingScreen } from './src/ui/screens/RecordingScreen';
-import { DeviceScreen } from './src/ui/screens/DeviceScreen';
-import { FilesScreen } from './src/ui/screens/FilesScreen';
-import { LogScreen } from './src/ui/screens/LogScreen';
-import { useSession } from './src/ui/hooks';
+import { engine } from './src/live/engine';
+import { ensureNotificationPermission, history, settings } from './src/app/services';
+import { TabBar } from './src/ui/kit';
+import { HomeIcon, SlidersIcon, TrendsIcon, WaveIcon } from './src/ui/icons';
+import { HomeScreen } from './src/ui/screens/HomeScreen';
+import { ListenScreen } from './src/ui/screens/ListenScreen';
+import { TrendsScreen } from './src/ui/screens/TrendsScreen';
+import { SoundsScreen } from './src/ui/screens/SoundsScreen';
+import { SettingsScreen } from './src/ui/screens/SettingsScreen';
+import { DeveloperScreen, PatchRecordingScreen } from './src/ui/screens/DeveloperScreen';
+import { FallAlert, ReattachSheet } from './src/ui/Overlays';
 import { colors } from './src/ui/theme';
+import { AppState } from 'react-native';
+
+type Tab = 'home' | 'trends' | 'sounds' | 'settings';
+type Sub = null | 'listen' | 'developer' | 'download';
 
 const TABS = [
-  { key: 'monitor', label: 'Monitor', Screen: MonitorScreen },
-  { key: 'recording', label: 'Recording', Screen: RecordingScreen },
-  { key: 'device', label: 'Device', Screen: DeviceScreen },
-  { key: 'files', label: 'Files', Screen: FilesScreen },
-  { key: 'log', label: 'Log', Screen: LogScreen },
-] as const;
-
-type TabKey = (typeof TABS)[number]['key'];
+  { key: 'home', label: 'Home', icon: (c: string) => <HomeIcon size={20} color={c} /> },
+  { key: 'trends', label: 'Trends', icon: (c: string) => <TrendsIcon size={20} color={c} /> },
+  { key: 'sounds', label: 'Sounds', icon: (c: string) => <WaveIcon size={20} color={c} /> },
+  { key: 'settings', label: 'Settings', icon: (c: string) => <SlidersIcon size={20} color={c} /> },
+];
 
 export default function App() {
-  const [tab, setTab] = useState<TabKey>('monitor');
-  const s = useSession();
-  const { Screen } = TABS.find((t) => t.key === tab) ?? TABS[0];
+  const [tab, setTab] = useState<Tab>('home');
+  const [sub, setSub] = useState<Sub>(null);
+
+  useEffect(() => {
+    void engine; // start the live engine
+    if (settings.get().fallAlerts) void ensureNotificationPermission();
+    // Save unsaved history minutes when the app goes to the background.
+    const sub = AppState.addEventListener('change', (s) => {
+      if (s !== 'active') history.flushLive(true);
+    });
+    return () => sub.remove();
+  }, []);
+
+  const openTab = (k: string) => {
+    setSub(null);
+    setTab(k as Tab);
+  };
+
+  let content: React.ReactNode;
+  if (sub === 'listen') content = <ListenScreen back={() => setSub(null)} openRecordings={() => openTab('sounds')} />;
+  else if (sub === 'developer') content = <DeveloperScreen back={() => setSub(null)} />;
+  else if (sub === 'download') content = <PatchRecordingScreen back={() => setSub(null)} />;
+  else if (tab === 'home') content = <HomeScreen go={(r) => (r === 'settings' ? openTab('settings') : setSub('listen'))} />;
+  else if (tab === 'trends') content = <TrendsScreen />;
+  else if (tab === 'sounds') content = <SoundsScreen />;
+  else content = <SettingsScreen go={(r) => setSub(r)} />;
 
   return (
     <SafeAreaProvider>
+      <StatusBar style="dark" />
       <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }} edges={['top', 'left', 'right']}>
-        <StatusBar style="light" />
-        <View style={{ paddingHorizontal: 16, paddingVertical: 10, flexDirection: 'row', alignItems: 'center' }}>
-          <Text style={{ color: colors.text, fontSize: 20, fontWeight: '700', flex: 1 }}>AusculPatch</Text>
-          <View
-            style={{
-              width: 10,
-              height: 10,
-              borderRadius: 5,
-              marginRight: 6,
-              backgroundColor: s.connected ? colors.ok : colors.muted,
-            }}
-          />
-          <Text style={{ color: colors.muted, fontSize: 13 }}>
-            {s.connected ? 'Connected' : s.status.startsWith('Connection lost') ? 'Reconnecting' : 'Offline'}
-          </Text>
-        </View>
-        <View style={{ flex: 1 }}>
-          <Screen />
-        </View>
+        <View style={{ flex: 1 }}>{content}</View>
       </SafeAreaView>
-      <SafeAreaView edges={['bottom']} style={{ backgroundColor: colors.surface }}>
-        <View style={{ flexDirection: 'row', borderTopWidth: 1, borderTopColor: colors.grid }}>
-          {TABS.map((t) => (
-            <Pressable
-              key={t.key}
-              onPress={() => setTab(t.key)}
-              style={{ flex: 1, paddingVertical: 12, alignItems: 'center' }}
-              accessibilityRole="tab"
-              accessibilityState={{ selected: tab === t.key }}
-            >
-              <Text
-                style={{
-                  color: tab === t.key ? colors.accent : colors.muted,
-                  fontSize: 13,
-                  fontWeight: tab === t.key ? '700' : '500',
-                }}
-              >
-                {t.label}
-              </Text>
-              {t.key === 'recording' && (s.download.phase === 'receiving' || s.download.phase === 'decoding') ? (
-                <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: colors.accent, marginTop: 3 }} />
-              ) : null}
-            </Pressable>
-          ))}
-        </View>
-      </SafeAreaView>
+      {sub === null ? (
+        <SafeAreaView edges={['bottom']} style={{ position: 'absolute', left: 0, right: 0, bottom: 0 }} pointerEvents="box-none">
+          <View style={{ height: 88 }} pointerEvents="box-none">
+            <TabBar tabs={TABS} active={tab} onChange={openTab} />
+          </View>
+        </SafeAreaView>
+      ) : null}
+      <ReattachSheet />
+      <FallAlert />
     </SafeAreaProvider>
   );
 }

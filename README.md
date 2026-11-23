@@ -1,10 +1,18 @@
 # AusculPatch for iPhone
 
-An iPhone app for the AusculPatch, built with Expo (React Native). It does what the desktop clinical monitor does, plus the developer controls you need in the field:
+An iPhone app for the AusculPatch, built with Expo (React Native).
 
-The Monitor tab shows heart rate, breathing rate, skin temperature and battery, with live heart-sound, ECG (mV) and breathing traces that use the same filters as `apps/clinical.py`. The Recording tab sets the measurement schedule (continuous or bursts), starts, stops and erases a recording on the patch, and downloads it to the phone as CSV. The Device tab has the protocol version, reset reason, sampling rates, ADS1220 gain and offset, and the flash self-test. Files lists every download and phone recording with a Share button (AirDrop, email, Files, OneDrive), and Log shows the patch's status lines.
+The app has four tabs. Home shows heart rate, breathing rate, today's steps and live heart-sound and ECG traces, with a 5, 10 or 30 s window and a contact badge on each trace. Listen plays the heart sound live through the speaker or headphones and records it. Trends charts heart rate, breathing rate and steps by day, week or month. Sounds lists recordings with a player and a Share button. Settings covers the patch, fall alerts, the step goal and history export. Settings › Developer holds the technical controls: sampling rates, filter tuning, signal-quality thresholds, the log and the raw files.
 
-The CSV is the same format the desktop tools write (`Timestamp(us),Device_Index,DataType,Value..Value6,Epoch_us`), so files from the phone open in the workbench.
+Default filters are a 25 to 80 Hz order-4 band-pass for heart sound, a 1 to 40 Hz order-2 band-pass for ECG, and a 0.5 Hz order-2 low-pass for breathing (taken from the heart-sound envelope). All three can be changed under Developer › Filters, and the changes are kept.
+
+What happens in the background:
+
+- Every second the app scores the ECG and heart-sound quality (`src/dsp/quality.ts`). If either stays poor for 10 s, a sheet asks you to reattach the patch, and heart rate and breathing rate are hidden until the signals recover.
+- Steps and falls come from the patch's accelerometer (`src/dsp/motion.ts`). A fall is a hard impact followed by 5 s of lying still at a clearly different angle. It raises a notification on the phone only. The sensitivity is set in Settings.
+- Heart rate, breathing rate and steps are saved per minute in SQLite (`src/history`). Downloads from the patch are analysed the same way and added to Trends, using the patch's own clock.
+
+The CSV files are the same format the desktop tools write (`Timestamp(us),Device_Index,DataType,Value..Value6,Epoch_us`), so files from the phone open in the workbench.
 
 ## How the code relates to the Python host
 
@@ -19,8 +27,10 @@ The CSV is the same format the desktop tools write (`Timestamp(us),Device_Index,
 | `src/protocol/csv.ts` | `storage.py` (writing) |
 | `src/live/buffers.ts` | `live.py` |
 | `src/dsp/filters.ts`, `vitals.ts` | `filters.py`, `vitals.py` |
-| `src/live/clinical.ts` | `ClinicalTraces` and `_refresh_vitals` in `apps/clinical.py` |
+| `src/live/clinical.ts` | `ClinicalTraces` and `_refresh_vitals` in `apps/clinical.py`, with filters from Settings |
 | `src/ble/session.ts` | `ble.py` and `ui/session.py` |
+
+Signal quality, steps, falls, history, audio and the download analysis (`src/analysis/offline.ts`) are new to the phone and have their own tests with synthetic signals (`__tests__/dsp.test.ts`, `history.test.ts`, `audio.test.ts`, `offline.test.ts`). The parity tests still check the port against the desktop's 20 to 100 Hz and 0.1 to 40 Hz filters, which `filters.ts` keeps as `HOST_*` constants.
 
 One deliberate difference: the Python assembler holds every dump chunk in memory. A full recording is about 134 MB, so the phone writes each chunk straight to a `.bin` file at its offset and keeps only the bookkeeping. The gap, CRC and resume rules are unchanged.
 
@@ -116,19 +126,29 @@ If Sideloadly reports that the bundle ID is unavailable, open Advanced options a
 
 If you want the weekly renewal to happen without plugging in, AltStore (altstore.io) can re-sign over Wi-Fi while its AltServer runs on the laptop. It uses the same iTunes and iCloud install and accepts the same `.ipa`.
 
+## Why it no longer lags at high sampling rates
+
+The first version filtered the signals inside the screen's render function and copied every sample of every trace on each redraw, about 2 MB of garbage a frame at 4 kHz. Now one timer in `src/live/engine.ts` does the filtering, steps, falls, audio and recording once per frame. Each trace asks its ring buffer for the minimum and maximum of every pixel column without copying (`ChannelBuffer.reduceColumns`) and draws one path with Skia on the GPU. Heart rate and breathing rate are worked out every 2 s, not every frame. The frame rate is 30 fps by default and can be set to 15 or 60 under Developer › Filters.
+
 ## Using it
 
-1. Open the app, tap Scan on the Monitor tab, then tap the patch.
-2. The traces start within a second or two. Heart rate needs about 2 s of ECG and breathing rate about 12 s of signal; until then the tiles show a dash.
-3. To download a recording, go to Recording and tap Download to phone. Keep the phone near the patch. The screen can lock; the app has Bluetooth background mode. If the link drops, tap Resume download and it asks the patch for the first page it is missing.
-4. Share the CSV from the download card or the Files tab. The raw `.bin` image is kept as well, in case you want to decode it again on the desktop.
+1. Open the app and tap Connect patch on Home, then tap the patch in the list.
+2. The traces start within a second or two. Heart rate needs about 2 s of clean ECG and breathing rate about 12 s of signal; until then the tiles say Measuring.
+3. Tap Listen to hear the heart sound. The 25 to 80 Hz heart band is too low for the phone's speaker, so use headphones, or switch the listening band to "Wider, for speaker" (25 to 400 Hz).
+4. Tap Record on Home or Listen. The recording saves an 8 kHz WAV of the heart sound plus a CSV of every sample, and appears under Sounds.
+5. To download what the patch stored, go to Settings › Recording on the patch and tap Download to phone. Keep the phone near the patch. If the link drops, tap Resume download. When it finishes, the minutes it covers appear in Trends.
+6. Share any recording from Sounds, or any raw file from Developer › Files.
 
 The patch schedule on this app always saves bursts to the patch's memory, as the desktop clinical app does, because a live-only schedule loses data once the phone leaves the room.
 
 ## Things that are untested
 
-The protocol, download and signal code is tested against the Python host. The Bluetooth layer (`react-native-ble-plx`) and the screens have only been compiled and bundled; they have not run on an iPhone yet. Check these on the first build:
+The protocol, download, signal-processing, quality, motion, history and audio-buffer code is tested in Jest. Everything that needs an iPhone has only been type-checked and bundled. Check these on the first build:
 
-- Connection and live streaming at the default rates (acoustic 2000 Hz). iOS picks the MTU itself; the Device tab shows what it got.
-- A full-size flash download. Download speed depends on the connection interval iOS accepts for the 7.5 ms the firmware requests.
+- Connection and live streaming at the default rates (acoustic 2000 Hz), and whether the traces stay smooth at 4000 Hz.
+- Live listening and WAV playback (`react-native-audio-api`), including how much delay the listening has.
+- Whether the quality thresholds suit the real patch. Watch the scores under Developer › Filters while you press, lift and rub the patch, and adjust "Good above" if the reminder comes too early or too late.
+- Step counts while walking and the fall detector, with a few controlled drops onto a cushion. The thresholds come from synthetic tests, not from patch data.
+- Fall notifications on the lock screen (allow notifications when asked).
+- A full-size flash download, and that its minutes show in Trends.
 - Reconnection after walking out of range.

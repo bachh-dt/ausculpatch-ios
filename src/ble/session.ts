@@ -20,6 +20,9 @@ import { LiveBuffers } from '../live/buffers';
 import { ClinicalPipeline } from '../live/clinical';
 import { base64ToBytes, bytesToBase64, toHex, utf8Decode } from '../util/base64';
 import { CsvFileWriter, FileImageSink, FileImageSource, newFile, stampedName } from '../storage/files';
+import { OfflineAnalyzer } from '../analysis/offline';
+import { history, settings } from '../app/services';
+import { recordings } from '../storage/recordings';
 
 export const RECONNECT_INTERVAL_MS = 2000;
 export const SCAN_TIMEOUT_MS = 10000;
@@ -119,7 +122,7 @@ export class PatchSession {
   private phoneCsvTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor() {
-    this.clinical = new ClinicalPipeline(this.buffers, () => this.state.rates);
+    this.clinical = new ClinicalPipeline(this.buffers, () => this.state.rates, settings.get());
     this.manager.onStateChange((s) => this.set({ bluetooth: s }), true);
   }
 
@@ -455,11 +458,13 @@ export class PatchSession {
       const writer = csv;
       let rows = '';
       let count = 0;
+      const analyzer = new OfflineAnalyzer(settings.get(), this.state.rates);
       const reader = new FlashImageReader(
         source,
         (s) => {
           rows += flashSampleRow(DEVICE_INDEX, s);
           count++;
+          analyzer.push(s);
         },
         this.assembler.session,
       );
@@ -476,8 +481,39 @@ export class PatchSession {
       source.close();
 
       const gaps = this.assembler.gaps();
+      const analysis = analyzer.finish();
+      history.saveRows(analysis.rows);
+      for (const f of analysis.falls) {
+        history.addEvent({
+          time: f.epochMs,
+          kind: 'fall',
+          source: 'patch',
+          detail: JSON.stringify({ impactG: f.impactG, angleDeg: f.angleDeg }),
+        });
+      }
+      const hrN = analysis.rows.reduce((a, r) => a + r.hrN, 0);
+      const hrSum = analysis.rows.reduce((a, r) => a + r.hrSum, 0);
+      const first = analysis.firstEpochMs;
+      const last = analysis.lastEpochMs;
+      recordings.add({
+        id: binFile.name,
+        kind: 'patch',
+        startedAt: first ?? Date.now(),
+        durationS: first !== null && last !== null ? (last - first) / 1000 : 0,
+        avgHeartRate: hrN ? hrSum / hrN : null,
+        wav: null,
+        csv: csvFile.name,
+        bin: binFile.name,
+        note: 'Downloaded from the patch',
+      });
+      const historyLine =
+        first === null
+          ? 'This recording has no clock time, so it was not added to Trends.'
+          : `Added ${analysis.rows.length} minutes to Trends` +
+            (analysis.falls.length ? `, including ${analysis.falls.length} possible fall(s).` : '.');
       const lines = [
         `Saved ${writer.rows} samples to ${csvFile.name}`,
+        historyLine,
         '',
         this.assembler.integrityReport(),
         '',
@@ -514,7 +550,8 @@ export class PatchSession {
   }
 
   // ----------------------------------------------------- phone recording --
-  startPhoneRecording(): void {
+  /** Starts writing every live sample to a CSV and returns its file name. */
+  startPhoneRecording(): string {
     this.stopPhoneRecording();
     const file = newFile(stampedName('AusculPatch_live', 'csv'));
     this.phoneCsv = new CsvFileWriter(file, 256 * 1024);
@@ -523,6 +560,7 @@ export class PatchSession {
       this.phoneCsv?.flush();
       this.set({ phoneRecording: { ...this.state.phoneRecording, rows: this.phoneCsv?.rows ?? 0 } });
     }, 1000);
+    return file.name;
   }
 
   stopPhoneRecording(): void {

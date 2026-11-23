@@ -27,8 +27,8 @@ export function Button({
   busy?: boolean;
   style?: ViewStyle;
 }) {
-  const bg = kind === 'primary' ? colors.accent : kind === 'danger' ? '#5a2526' : colors.raised;
-  const fg = kind === 'primary' ? '#06202b' : kind === 'danger' ? '#ffcdd2' : colors.text;
+  const bg = kind === 'primary' ? colors.accent : kind === 'danger' ? colors.dangerSoft : colors.raised;
+  const fg = kind === 'primary' ? '#FFFFFF' : kind === 'danger' ? colors.danger : colors.text;
   return (
     <Pressable
       accessibilityRole="button"
@@ -50,8 +50,10 @@ export function Chip({ label, selected, onPress }: { label: string; selected?: b
     <Pressable
       onPress={onPress}
       style={[styles.chip, selected && { backgroundColor: colors.accent, borderColor: colors.accent }]}
+      accessibilityRole="button"
+      accessibilityState={{ selected: !!selected }}
     >
-      <Text style={[styles.chipText, selected && { color: '#06202b', fontWeight: '700' }]}>{label}</Text>
+      <Text style={[styles.chipText, selected && { color: '#FFFFFF', fontWeight: '700' }]}>{label}</Text>
     </Pressable>
   );
 }
@@ -101,17 +103,15 @@ export function Stepper({
 export const styles = StyleSheet.create({
   card: {
     backgroundColor: colors.surface,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: colors.grid,
-    padding: space.m,
+    borderRadius: 22,
+    padding: space.l,
     marginBottom: space.m,
   },
   cardTitle: { color: colors.muted, fontSize: 13, fontWeight: '700', marginBottom: space.s, letterSpacing: 0.5 },
   button: {
     minHeight: 44,
     paddingHorizontal: space.l,
-    borderRadius: 10,
+    borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -121,8 +121,8 @@ export const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: colors.grid,
-    backgroundColor: colors.raised,
+    borderColor: '#D5DDEA',
+    backgroundColor: colors.surface,
   },
   chipText: { color: colors.text, fontSize: 14 },
   row: {
