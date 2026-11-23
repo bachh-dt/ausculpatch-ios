@@ -9,7 +9,7 @@ import * as P from '../../protocol/protocol';
 import { useEngine, useSession, useSettings } from '../hooks';
 import { Badge, BigButton, Header, IconTile, Panel, qualityBadge, RoundButton, Screen, Segmented } from '../kit';
 import { BluetoothIcon, BreathIcon, HeartIcon, RecordDot, ShieldIcon, SlidersIcon, SpeakerIcon } from '../icons';
-import { SignalTrace } from '../SignalTrace';
+import { LiveTraces } from '../LiveTraces';
 import { colors, font, space } from '../theme';
 import { batteryPercent, dutyInWords, greeting } from '../words';
 import { WindowS } from '../../settings/settings';
@@ -143,8 +143,6 @@ export function HomeScreen({ go }: { go: (route: 'listen' | 'settings') => void 
   const traceWidth = width - 2 * space.xl - 2 * space.l;
   const goal = Math.max(1, st.stepGoal);
   const stepPct = Math.min(100, (100 * e.stepsToday) / goal);
-  const hq = qualityBadge(e.heartQuality.level, s.connected);
-  const eq = qualityBadge(e.ecgQuality.level, s.connected);
 
   return (
     <Screen>
@@ -166,7 +164,7 @@ export function HomeScreen({ go }: { go: (route: 'listen' | 'settings') => void 
           title="Heart rate"
           value={e.vitals.heartRate}
           unit="bpm"
-          source="From ECG"
+          source="From ECG, last 15 s"
           icon={<HeartIcon size={18} color={colors.heart} />}
           iconBg={colors.heartSoft}
           quality={e.ecgQuality.level}
@@ -210,45 +208,7 @@ export function HomeScreen({ go }: { go: (route: 'listen' | 'settings') => void 
           <Text style={{ fontSize: 16, fontWeight: '700', color: colors.text }}>Live signals</Text>
           <Segmented label="Time window" options={WINDOW_OPTIONS} value={st.windowS} onChange={(v) => settings.update({ windowS: v })} />
         </View>
-        <View style={{ gap: 4 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-            <Text style={{ fontSize: 12, fontWeight: '700', color: colors.muted }}>● Heart sound</Text>
-            <Badge {...hq} />
-          </View>
-          <SignalTrace
-            source={() => (st.showRaw ? session.buffers.channels[P.CHANNEL_ACOUSTIC] : session.clinical.heartOut)}
-            windowS={st.windowS}
-            width={traceWidth}
-            height={72}
-            color={colors.heart}
-            label="Heart sound"
-          />
-        </View>
-        <View style={{ gap: 4 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-            <Text style={{ fontSize: 12, fontWeight: '700', color: colors.muted }}>● ECG</Text>
-            <Badge {...eq} />
-          </View>
-          <SignalTrace
-            source={() => (st.showRaw ? session.clinical.ecgRawMv : session.clinical.ecgOut)}
-            windowS={st.windowS}
-            width={traceWidth}
-            height={72}
-            color={colors.ecg}
-            label="ECG"
-          />
-        </View>
-        <View style={{ gap: 4 }}>
-          <Text style={{ fontSize: 12, fontWeight: '700', color: colors.muted }}>● Breathing</Text>
-          <SignalTrace
-            source={() => session.clinical.breathOut}
-            windowS={Math.max(st.windowS, 30)}
-            width={traceWidth}
-            height={56}
-            color={colors.breath}
-            label="Breathing"
-          />
-        </View>
+        <LiveTraces width={traceWidth} windowS={st.windowS} />
         <View style={{ flexDirection: 'row', gap: 10 }}>
           <BigButton label="Listen" icon={<SpeakerIcon size={20} color="#FFFFFF" />} onPress={() => go('listen')} style={{ flex: 1 }} />
           <BigButton

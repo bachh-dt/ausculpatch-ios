@@ -66,6 +66,10 @@ describe('settings', () => {
     expect(breathSpec({ ...DEFAULT_SETTINGS, breathLowHz: 0 }).kind).toBe('lowpass');
     expect(DEFAULT_SETTINGS.breathOrder).toBe(2);
   });
+  test('trace visibility merges key by key', () => {
+    const s = mergeSettings({ traces: { scg: true, ecg: false, bogus: 1, heart: 'yes' } });
+    expect(s.traces).toEqual({ heart: true, ecg: false, breath: true, scg: true, accel: false });
+  });
   test('merge keeps good values and drops bad ones', () => {
     const s = mergeSettings({ windowS: 30, heartBand: { lowHz: 90, highHz: 20, order: 4 }, stepGoal: 'x', traceFps: 7 });
     expect(s.windowS).toBe(30);

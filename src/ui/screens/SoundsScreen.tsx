@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Pressable, Text, View } from 'react-native';
 import * as Sharing from 'expo-sharing';
 import { File } from 'expo-file-system';
-import { FilePlayer } from '../../audio/audio';
+import { IosFilePlayer } from '../../audio/iosAudio';
 import { waveformBars } from '../../audio/pcm';
 import { RecordingMeta, recordings } from '../../storage/recordings';
 import { useRecordingsVersion, useTicker } from '../hooks';
@@ -11,7 +11,7 @@ import { PauseIcon, PlayIcon, ShareIcon, WaveIcon } from '../icons';
 import { colors, font } from '../theme';
 import { clock, mmss } from '../words';
 
-const player = new FilePlayer();
+const player = new IosFilePlayer();
 const BARS = 40;
 
 function describe(m: RecordingMeta): string {
@@ -72,7 +72,7 @@ export function SoundsScreen() {
       return;
     }
     try {
-      await player.play(recordings.uri(sel.wav) as string);
+      await player.play(recordings.uri(sel.wav) as string, sel.durationS);
       setPlaying(true);
     } catch (e) {
       setError(`Could not play this file: ${String((e as Error).message ?? e)}`);

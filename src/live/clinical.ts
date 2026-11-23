@@ -13,6 +13,7 @@ import { BlockMeanDecimator, FilterSpec, hasGap, StreamingFilter } from '../dsp/
 import { estimateHeartRate, estimateRateFromWave, RR_MAX_BPM, RR_MIN_BPM } from '../dsp/vitals';
 import { ChannelBuffer, LiveBuffers } from './buffers';
 import { breathSpec, DEFAULT_SETTINGS, ecgSpec, heartSpec, listenSpec, Settings } from '../settings/settings';
+import { SCG_BAND } from '../dsp/cardiac';
 
 export const VITALS_WINDOW_S = 20;
 export const TRACE_HISTORY_S = 35;
@@ -38,6 +39,14 @@ export class ClinicalPipeline {
   readonly ecgOut = new ChannelBuffer('ecg', 1000 * TRACE_HISTORY_S);
   /** Unfiltered ECG in mV on the same time axis, for the quality check and the raw view. */
   readonly ecgRawMv = new ChannelBuffer('ecg_raw', 1000 * TRACE_HISTORY_S);
+  /** Seismocardiogram: one accelerometer axis band-passed to 1-30 Hz, in g. */
+  readonly scgOut = new ChannelBuffer('scg', 1000 * TRACE_HISTORY_S);
+  /** Accelerometer magnitude in g. */
+  readonly accelMag = new ChannelBuffer('accel', 1000 * TRACE_HISTORY_S);
+  private scgFilter = new StreamingFilter(new FilterSpec('bandpass', SCG_BAND.order, SCG_BAND.lowHz, SCG_BAND.highHz));
+  private scgAxis = 2;
+  private imuSeen = 0;
+  private imuLastT: number | null = null;
 
   listenSink: ListenSink | null = null;
 
@@ -76,6 +85,12 @@ export class ClinicalPipeline {
     this.breathFilter = breath;
     this.ecgFilter = ecg;
     this.listenFilter = swap(this.listenFilter, listenSpec(s));
+    const axis = s.scgAxis === 'x' ? 0 : s.scgAxis === 'y' ? 1 : 2;
+    if (axis !== this.scgAxis) {
+      this.scgAxis = axis;
+      this.scgFilter.reset();
+      this.scgOut.clear();
+    }
   }
 
   describeFilters(): { heart: string; ecg: string; breath: string } {
@@ -96,6 +111,11 @@ export class ClinicalPipeline {
     this.breathOut.clear();
     this.ecgOut.clear();
     this.ecgRawMv.clear();
+    this.scgOut.clear();
+    this.accelMag.clear();
+    this.scgFilter.reset();
+    this.imuSeen = 0;
+    this.imuLastT = null;
     this.acoSeen = this.ecgSeen = 0;
     this.acoLastT = this.ecgLastT = null;
   }
@@ -150,6 +170,24 @@ export class ClinicalPipeline {
       this.ecgRawMv.addSeconds(mt, mV);
       this.ecgOut.addSeconds(mt, this.ecgFilter.process(mV, this.rate('ECG')));
     }
+    this.updateImu();
+  }
+
+  private updateImu(): void {
+    const imu = this.buffers.channels[P.CHANNEL_IMU];
+    const total = imu.totalSamples;
+    const n = Math.min(Math.max(0, total - this.imuSeen), imu.length);
+    this.imuSeen = total;
+    if (!n) return;
+    const [t, x] = imu.latest(n, 0);
+    const [, y] = imu.latest(n, 1);
+    const [, z] = imu.latest(n, 2);
+    if (hasGap(this.imuLastT, t)) this.scgFilter.reset();
+    this.imuLastT = t[t.length - 1];
+    const fs = imu.timestampRateHz(5) || this.configuredRates().IMU || 0;
+    const axis = this.scgAxis === 0 ? x : this.scgAxis === 1 ? y : z;
+    this.scgOut.addSeconds(t, this.scgFilter.process(axis, fs));
+    this.accelMag.addSeconds(t, Float64Array.from(t, (_, i) => Math.sqrt(x[i] * x[i] + y[i] * y[i] + z[i] * z[i])));
   }
 
   /** Estimation uses the rate the timestamps imply, not the requested rate. */

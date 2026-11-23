@@ -28,13 +28,16 @@ export function ListenScreen({ back, openRecordings }: { back: () => void; openR
   const e = useEngine();
   const st = useSettings();
   const [busy, setBusy] = useState(false);
-  const [toneBusy, setToneBusy] = useState(false);
-  const testTone = async () => {
-    setToneBusy(true);
+  const [toneBusy, setToneBusy] = useState<null | 'ios' | 'web'>(null);
+  const [toneResult, setToneResult] = useState<string | null>(null);
+  const [listenError, setListenError] = useState<string | null>(null);
+  const testTone = async (route: 'ios' | 'web') => {
+    setToneBusy(route);
+    setToneResult(null);
     try {
-      await engine.testTone();
+      setToneResult(await engine.testTone(route));
     } finally {
-      setToneBusy(false);
+      setToneBusy(null);
     }
   };
   const { width } = useWindowDimensions();
@@ -44,8 +47,11 @@ export function ListenScreen({ back, openRecordings }: { back: () => void; openR
   const toggleListen = async () => {
     setBusy(true);
     try {
+      setListenError(null);
       if (e.listening) await engine.stopListening();
       else await engine.startListening();
+    } catch (err) {
+      setListenError(`Could not start sound: ${String((err as Error).message ?? err)}`);
     } finally {
       setBusy(false);
     }
@@ -120,11 +126,26 @@ export function ListenScreen({ back, openRecordings }: { back: () => void; openR
           value={st.listenBand}
           onChange={(v) => settings.update({ listenBand: v as 'heart' | 'wide' })}
         />
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-          <BigButton label="Test sound" kind="soft" busy={toneBusy} onPress={testTone} style={{ minHeight: 38 }} />
-          {e.listening ? <Text style={font.small}>{`${e.audio.buffers} buffers · ${e.audio.underruns} gaps`}</Text> : null}
+        {listenError ? <Text style={[font.small, { color: colors.danger, textAlign: 'center' }]}>{listenError}</Text> : null}
+        <Segmented
+          label="Audio route"
+          options={[
+            { value: 'ios', label: 'iOS player' },
+            { value: 'web', label: 'Web Audio' },
+          ]}
+          value={st.audioEngine}
+          onChange={(v) => settings.update({ audioEngine: v as 'ios' | 'web' })}
+        />
+        <Text style={[font.small, { textAlign: 'center' }]}>
+          {st.audioEngine === 'ios' ? 'Apple’s standard player. Reliable, about 1 s behind the traces.' : 'Lower delay, but it was silent on your iPhone before.'}
+          {e.listening ? `  ${e.audio.buffers} pieces played, ${e.audio.underruns} gaps.` : ''}
+        </Text>
+        <View style={{ flexDirection: 'row', gap: 10, alignSelf: 'stretch' }}>
+          <BigButton label="Test iOS player" kind="soft" busy={toneBusy === 'ios'} disabled={toneBusy !== null} onPress={() => testTone('ios')} style={{ flex: 1, minHeight: 40 }} />
+          <BigButton label="Test Web Audio" kind="soft" busy={toneBusy === 'web'} disabled={toneBusy !== null} onPress={() => testTone('web')} style={{ flex: 1, minHeight: 40 }} />
         </View>
-        <Text style={[font.small, { textAlign: 'center' }]}>No sound at all? Tap Test sound. If the tone is silent too, turn up the volume with the side buttons (media volume, not ringer).</Text>
+        {toneResult ? <Text style={[font.small, { textAlign: 'center' }]}>{toneResult}</Text> : null}
+        <Text style={[font.small, { textAlign: 'center' }]}>Each test plays a 1 s beep. If neither beeps, turn the media volume up with the side buttons while a test is playing.</Text>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
           <Text style={font.label}>Volume</Text>
           <Segmented label="Volume" options={VOLUMES} value={volume} onChange={(v) => settings.update({ listenVolume: v })} />

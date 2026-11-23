@@ -47,14 +47,12 @@ test('a download becomes per-minute history with heart rate and steps', () => {
   const r = a.finish();
   expect(r.firstEpochMs).toBe(start / 1000);
   expect(r.rows.length).toBe(2);
-  const hrN = r.rows.reduce((s, x) => s + x.hrN, 0);
-  expect(hrN).toBeGreaterThanOrEqual(5);
-  for (const row of r.rows) {
-    if (row.hrN) {
-      expect(row.hrSum / row.hrN).toBeGreaterThan(69);
-      expect(row.hrSum / row.hrN).toBeLessThan(75);
-    }
-  }
+  // Minute 1 is fully covered; minute 2 has only 30 s, under the 60% needed for a heart rate.
+  const withHr = r.rows.filter((x) => x.hrN > 0);
+  expect(withHr).toHaveLength(1);
+  expect(withHr[0].hrSum / withHr[0].hrN).toBeGreaterThan(70);
+  expect(withHr[0].hrSum / withHr[0].hrN).toBeLessThan(74);
+  expect(withHr[0].hrMax! - withHr[0].hrMin!).toBeLessThan(3);
   const steps = r.rows.reduce((s, x) => s + x.steps, 0);
   expect(steps).toBeGreaterThan(95); // ~60 s at 1.8 steps/s
   expect(steps).toBeLessThan(112);

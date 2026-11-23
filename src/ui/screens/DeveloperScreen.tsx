@@ -9,13 +9,14 @@ import { BandSetting, DEFAULT_SETTINGS, FallSensitivity } from '../../settings/s
 import { useEngine, useSession, useSettings } from '../hooks';
 import { Badge, BigButton, Header, NumberStepper, Panel, qualityBadge, Segmented, SwitchRow } from '../kit';
 import { SignalTrace } from '../SignalTrace';
+import { LiveTraces, TRACE_INFO } from '../LiveTraces';
 import { colors, font, space } from '../theme';
 import { DeviceScreen } from './DeviceScreen';
 import { FilesScreen } from './FilesScreen';
 import { LogScreen } from './LogScreen';
 import { RecordingScreen } from './RecordingScreen';
 
-type Tab = 'sampling' | 'filters' | 'motion' | 'log' | 'files';
+type Tab = 'signals' | 'sampling' | 'filters' | 'motion' | 'log' | 'files';
 
 const ORDERS = [
   { value: 2, label: '2' },
@@ -105,9 +106,7 @@ function FiltersPanel() {
 
       <Panel>
         <Text style={{ fontSize: 13, fontWeight: '700', color: colors.muted }}>Preview with the current filters</Text>
-        <SignalTrace source={() => session.clinical.heartOut} windowS={5} width={traceWidth} height={64} color={colors.heart} label="Heart sound preview" />
-        <SignalTrace source={() => session.clinical.ecgOut} windowS={5} width={traceWidth} height={64} color={colors.ecg} label="ECG preview" />
-        <SignalTrace source={() => session.clinical.breathOut} windowS={30} width={traceWidth} height={56} color={colors.breath} label="Breathing preview, 30 s" />
+        <LiveTraces width={traceWidth} windowS={5} height={64} />
         <Text style={font.small}>Filters run on the phone. They change the traces, heart rate and breathing rate. Recordings always keep the raw samples.</Text>
       </Panel>
 
@@ -150,9 +149,6 @@ function FiltersPanel() {
         </View>
         <Text style={font.small}>Lower refresh saves battery on long sessions. Recording always keeps every sample.</Text>
       </Panel>
-      <View style={{ backgroundColor: colors.surface, borderRadius: 22 }}>
-        <SwitchRow title="Show unfiltered signals on Home" value={st.showRaw} onChange={(v) => settings.update({ showRaw: v })} />
-      </View>
 
       <BigButton
         label="Reset filters and quality to defaults"
@@ -162,6 +158,51 @@ function FiltersPanel() {
       <Text style={[font.small, { textAlign: 'center' }]}>
         {`Defaults: heart sound ${DEFAULT_SETTINGS.heartBand.lowHz}-${DEFAULT_SETTINGS.heartBand.highHz} Hz order ${DEFAULT_SETTINGS.heartBand.order}, ECG ${DEFAULT_SETTINGS.ecgBand.lowHz}-${DEFAULT_SETTINGS.ecgBand.highHz} Hz order ${DEFAULT_SETTINGS.ecgBand.order}, breathing ${DEFAULT_SETTINGS.breathLowHz}-${DEFAULT_SETTINGS.breathCutHz} Hz order ${DEFAULT_SETTINGS.breathOrder}.`}
       </Text>
+    </ScrollView>
+  );
+}
+
+function SignalsPanel() {
+  const st = useSettings();
+  const { width } = useWindowDimensions();
+  const traceWidth = width - 2 * space.xl - 2 * space.l;
+  return (
+    <ScrollView contentContainerStyle={{ paddingHorizontal: space.xl, paddingBottom: 40, gap: 12 }}>
+      <Text style={font.small}>Choose which live signals Home shows. Hidden signals are still recorded and analysed.</Text>
+      <View style={{ backgroundColor: colors.surface, borderRadius: 22 }}>
+        {TRACE_INFO.map((t, i) => (
+          <View key={t.key} style={{ borderBottomWidth: i < TRACE_INFO.length - 1 ? 1 : 0, borderBottomColor: colors.line }}>
+            <SwitchRow
+              title={t.label}
+              subtitle={t.note}
+              value={st.traces[t.key]}
+              onChange={(v) => settings.update({ traces: { ...st.traces, [t.key]: v } })}
+            />
+          </View>
+        ))}
+      </View>
+      <View style={{ backgroundColor: colors.surface, borderRadius: 22 }}>
+        <SwitchRow title="Show unfiltered heart sound and ECG" value={st.showRaw} onChange={(v) => settings.update({ showRaw: v })} />
+      </View>
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+        <Text style={font.label}>SCG axis</Text>
+        <Segmented
+          label="SCG axis"
+          options={[
+            { value: 'auto', label: 'Auto' },
+            { value: 'x', label: 'X' },
+            { value: 'y', label: 'Y' },
+            { value: 'z', label: 'Z' },
+          ]}
+          value={st.scgAxis}
+          onChange={(v) => settings.update({ scgAxis: v as 'auto' | 'x' | 'y' | 'z' })}
+        />
+      </View>
+      <Text style={font.small}>Auto picks the strongest axis in the Science analysis; the live SCG trace uses Z until you choose one.</Text>
+      <Panel>
+        <Text style={{ fontSize: 13, fontWeight: '700', color: colors.muted }}>Preview</Text>
+        <LiveTraces width={traceWidth} windowS={5} height={60} />
+      </Panel>
     </ScrollView>
   );
 }
@@ -219,7 +260,7 @@ function MotionPanel() {
 }
 
 export function DeveloperScreen({ back }: { back: () => void }) {
-  const [tab, setTab] = useState<Tab>('sampling');
+  const [tab, setTab] = useState<Tab>('signals');
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
       <View style={{ paddingHorizontal: space.xl, paddingTop: space.s, gap: 12, paddingBottom: 12 }}>
@@ -229,7 +270,8 @@ export function DeveloperScreen({ back }: { back: () => void }) {
           onWhite={false}
           stretch
           options={[
-            { value: 'sampling', label: 'Sampling' },
+            { value: 'signals', label: 'Signals' },
+            { value: 'sampling', label: 'Rates' },
             { value: 'filters', label: 'Filters' },
             { value: 'motion', label: 'Motion' },
             { value: 'log', label: 'Log' },
@@ -240,7 +282,7 @@ export function DeveloperScreen({ back }: { back: () => void }) {
         />
       </View>
       <View style={{ flex: 1 }}>
-        {tab === 'sampling' ? <DeviceScreen /> : tab === 'filters' ? <FiltersPanel /> : tab === 'motion' ? <MotionPanel /> : tab === 'log' ? <LogScreen /> : <FilesScreen />}
+        {tab === 'signals' ? <SignalsPanel /> : tab === 'sampling' ? <DeviceScreen /> : tab === 'filters' ? <FiltersPanel /> : tab === 'motion' ? <MotionPanel /> : tab === 'log' ? <LogScreen /> : <FilesScreen />}
       </View>
     </View>
   );

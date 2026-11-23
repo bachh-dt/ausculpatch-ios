@@ -49,6 +49,8 @@ export function TrendsScreen() {
   let headline: string = '--';
   let s1 = '--', s2 = '--', s3 = '--';
   const labels = metric === 'steps' ? ['Total', 'Daily average', 'Best day'] : ['Lowest', 'Average', 'Highest'];
+  const minutes = bins.reduce((a, b) => a + (metric === 'hr' ? b.hrMinutes : metric === 'br' ? b.brMinutes : 0), 0);
+  const coverage = minutes >= 60 ? `${Math.floor(minutes / 60)} h ${minutes % 60} min` : `${minutes} min`;
   if (hasData) {
     if (metric === 'steps') {
       const total = bins.reduce((a, b) => a + b.steps, 0);
@@ -64,8 +66,17 @@ export function TrendsScreen() {
         labels[2] = 'Busiest 3 hours';
       }
     } else {
-      const means = bins.map((b) => (metric === 'hr' ? b.hrMean : b.brMean)).filter((v): v is number => v !== null);
-      const avg = means.reduce((a, b) => a + b, 0) / means.length;
+      // Weight each bin by how many minutes it holds.
+      let wsum = 0, w = 0;
+      for (const b of bins) {
+        const mean = metric === 'hr' ? b.hrMean : b.brMean;
+        const n = metric === 'hr' ? b.hrMinutes : b.brMinutes;
+        if (mean !== null) {
+          wsum += mean * n;
+          w += n;
+        }
+      }
+      const avg = wsum / (w || 1);
       headline = String(Math.round(avg));
       s1 = String(Math.round(Math.min(...spans.filter(Boolean).map((s) => (s as [number, number])[0]))));
       s2 = headline;
@@ -130,6 +141,9 @@ export function TrendsScreen() {
           </View>
         </View>
         {!hasData ? <Text style={[font.small, { textAlign: 'center' }]}>No data for this period yet. Wear the patch while the app is connected, or download a recording from the patch.</Text> : null}
+        {hasData && metric !== 'steps' ? (
+          <Text style={font.small}>{`Based on ${coverage} with a clean signal. Bars run from the slowest to the fastest ${metric === 'hr' ? '15-second average' : 'typical value'}.`}</Text>
+        ) : null}
       </Panel>
 
       <View style={{ flexDirection: 'row', gap: 10 }}>
@@ -160,7 +174,7 @@ export function TrendsScreen() {
 
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 4 }}>
         <DownloadIcon size={16} color={colors.muted} />
-        <Text style={[font.small, { flex: 1 }]}>Includes live sessions and data recovered from patch downloads. Heart rate and breathing are only stored while the signal quality is good.</Text>
+        <Text style={[font.small, { flex: 1 }]}>Includes live sessions and patch downloads. A minute gets a heart rate only when at least 36 s of it has clean, checked heartbeats; single odd beats and noise are left out.</Text>
       </View>
     </Screen>
   );

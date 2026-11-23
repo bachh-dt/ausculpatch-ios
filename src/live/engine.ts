@@ -16,8 +16,11 @@ import { ecgQuality, EcgQuality, heartSoundQuality, PoorContactTimer, Quality, U
 import { FallDetector, FallEvent, StepCounter } from '../dsp/motion';
 import { history, notifyFall, notifyReattach, settings } from '../app/services';
 import { LiveListener, playTestTone, WavRecorder } from '../audio/audio';
+import { ChunkedLivePlayer, iosTestTone } from '../audio/iosAudio';
 import { analyzeCardiac, CardiacResult } from '../dsp/cardiac';
 import { FallCheck } from '../dsp/motion';
+import { HeartRateTracker } from '../dsp/hrtrack';
+import { median } from '../dsp/signal';
 import { recordings } from '../storage/recordings';
 import { newFile, stampedName } from '../storage/files';
 
@@ -77,12 +80,17 @@ class LiveEngine {
   private snoozeUntil = 0;
   private reattachNotified = false;
 
+  private hr = new HeartRateTracker();
+  private hrGeneration = -1;
+  private breathRecent: number[] = [];
   private steps = new StepCounter();
   private falls = new FallDetector('normal');
   private imuSeen = 0;
   private imuGeneration = -1;
 
-  private listener = new LiveListener();
+  private webListener = new LiveListener();
+  private iosListener = new ChunkedLivePlayer();
+  private listener: LiveListener | ChunkedLivePlayer = this.iosListener;
   private wav: WavRecorder | null = null;
   private csvName: string | null = null;
   private hrDuringRecording: number[] = [];
@@ -91,6 +99,10 @@ class LiveEngine {
     this.state.stepsToday = history.stepsToday();
     this.applySettings();
     settings.subscribe(() => this.applySettings());
+    history.subscribe(() => {
+      const steps = history.stepsToday();
+      if (steps !== this.state.stepsToday) this.set({ stepsToday: steps });
+    });
     session.subscribe(() => {
       if (!session.state.connected && this.state.reattach) this.set({ reattach: false });
     });
@@ -115,8 +127,19 @@ class LiveEngine {
     session.clinical.configure(s);
     this.falls.sensitivity = s.fallSensitivity;
     this.poorTimer.delayS = s.reattachDelayS;
-    this.listener.volume = s.listenVolume;
-    this.listener.boost = s.listenBand === 'wide';
+    for (const l of [this.webListener, this.iosListener]) {
+      l.volume = s.listenVolume;
+      l.boost = s.listenBand === 'wide';
+    }
+    const wanted = s.audioEngine === 'web' ? this.webListener : this.iosListener;
+    if (wanted !== this.listener) {
+      const was = this.listener.active;
+      void this.listener.stop().then(async () => {
+        this.listener = wanted;
+        if (was) await this.listener.start();
+        this.wireSink();
+      });
+    }
     if (s.traceFps !== this.fps) {
       this.fps = s.traceFps;
       if (this.timer) clearInterval(this.timer);
@@ -211,6 +234,7 @@ class LiveEngine {
     const [et, ef] = c.ecgOut.snapshot(QUALITY_WINDOW_S);
     const [, er] = c.ecgRawMv.snapshot(QUALITY_WINDOW_S);
     const eq = ecgQuality(er, ef, c.rate('ECG'), s.qualityThreshold);
+    this.trackBeats(et, eq.beats, eq.level, now);
 
     const [ht, hf] = c.heartOut.snapshot(QUALITY_WINDOW_S);
     const [, ar] = session.buffers.channels[P.CHANNEL_ACOUSTIC].snapshot(QUALITY_WINDOW_S);
@@ -228,20 +252,42 @@ class LiveEngine {
     this.set({ ecgQuality: eq, heartQuality: hq, reattach: show });
   }
 
+  /** Beat-by-beat heart rate: checked R-R intervals go to the live value and to history. */
+  private trackBeats(et: Float64Array, beats: number[], level: Quality['level'], now: number): void {
+    if (session.buffers.generation !== this.hrGeneration) {
+      this.hrGeneration = session.buffers.generation;
+      this.hr.reset();
+      this.breathRecent = [];
+    }
+    if (!et.length) return;
+    if (level === 'poor' || level === 'none') {
+      this.hr.breakChain();
+      return;
+    }
+    if (level !== 'good') return;
+    // A peak in the last 0.1 s may still be rising; the next window will have it.
+    const span = et[et.length - 1] - et[0];
+    const abs = beats.filter((b) => b <= span - 0.1).map((b) => et[0] + b);
+    const latest = session.buffers.latestTimeS() ?? et[et.length - 1];
+    for (const a of this.hr.addBeats(abs, true)) history.vitals.addBeat(now - (latest - a.t) * 1000, a.rr);
+  }
+
   private updateVitals(now: number): void {
     const raw = session.clinical.vitals();
     const { ecgQuality: eq, heartQuality: hq } = this.state;
     const poor = (q: Quality) => q.level === 'poor' || q.level === 'none';
+    const latest = session.buffers.latestTimeS();
     // Never show a number worked out from a bad signal.
-    const vitals: Vitals = {
-      ...raw,
-      heartRate: poor(eq) ? null : raw.heartRate,
-      breathingRate: poor(hq) ? null : raw.breathingRate,
-    };
-    if (vitals.heartRate !== null || vitals.breathingRate !== null) {
-      history.live.addVitals(now, vitals.heartRate, vitals.breathingRate);
-    }
-    if (this.wav && vitals.heartRate !== null) this.hrDuringRecording.push(vitals.heartRate);
+    const heartRate = poor(eq) || latest === null ? null : this.hr.liveHr(latest);
+    const br = poor(hq) ? null : raw.breathingRate;
+    if (br !== null) {
+      history.vitals.addBreath(now, br);
+      this.breathRecent.push(br);
+      if (this.breathRecent.length > 3) this.breathRecent.shift();
+    } else if (poor(hq)) this.breathRecent = [];
+    const breathingRate = br !== null && this.breathRecent.length ? median(this.breathRecent) : null;
+    const vitals: Vitals = { ...raw, heartRate, breathingRate };
+    if (this.wav && heartRate !== null) this.hrDuringRecording.push(heartRate);
     this.set({ vitals, vitalsAt: now });
   }
 
@@ -283,8 +329,9 @@ class LiveEngine {
     };
   }
 
-  async testTone(): Promise<void> {
-    await playTestTone();
+  /** Plays a 1 s tone through one audio route and says what happened. */
+  async testTone(route: 'ios' | 'web'): Promise<string> {
+    return route === 'ios' ? iosTestTone() : playTestTone();
   }
 
   /** Shows the fall alert and sends the notification, without a fall. */
@@ -320,7 +367,12 @@ class LiveEngine {
   }
 
   async startListening(): Promise<void> {
-    await this.listener.start();
+    try {
+      await this.listener.start();
+    } catch (e) {
+      session.log.push(`Could not start listening: ${String((e as Error).message ?? e)}`);
+      throw e;
+    }
     this.wireSink();
     this.set({ listening: true });
   }

@@ -116,6 +116,9 @@ export interface Bin {
   brMax: number | null;
   brMean: number | null;
   steps: number;
+  /** Minutes with a stored heart rate / breathing rate in this bin. */
+  hrMinutes: number;
+  brMinutes: number;
   /** True for bins that start after `now` (drawn empty). */
   future: boolean;
 }
@@ -155,6 +158,8 @@ export function binRows(period: Period, now: Date, rows: MinuteRow[]): Bin[] {
     brMax: null,
     brMean: null,
     steps: 0,
+    hrMinutes: 0,
+    brMinutes: 0,
     future: e.start > now.getTime(),
   }));
   const sums = edges.map(() => ({ hr: 0, hrN: 0, br: 0, brN: 0 }));
@@ -186,6 +191,8 @@ export function binRows(period: Period, now: Date, rows: MinuteRow[]): Bin[] {
   bins.forEach((bin, k) => {
     bin.hrMean = sums[k].hrN ? sums[k].hr / sums[k].hrN : null;
     bin.brMean = sums[k].brN ? sums[k].br / sums[k].brN : null;
+    bin.hrMinutes = sums[k].hrN;
+    bin.brMinutes = sums[k].brN;
   });
   return bins;
 }

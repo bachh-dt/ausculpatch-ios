@@ -11,6 +11,8 @@ import { AudioBufferSourceNode, AudioContext, AudioManager, GainNode } from 'rea
 import { File, FileMode } from 'expo-file-system';
 import type { FileHandle } from 'expo-file-system';
 import { Agc, AUDIO_RATE, floatToPcm16, Resampler, wavHeader } from './pcm';
+import { speakerBoost } from './boost';
+export { speakerBoost };
 
 const CHUNK_S = 0.05;
 /** Start this far ahead of "now", and again after the stream runs dry. */
@@ -28,14 +30,6 @@ async function releaseSession(): Promise<void> {
     sessionUsers = 0;
     await AudioManager.setAudioSessionActivity(false).catch(() => undefined);
   }
-}
-
-/** Soft clipping adds harmonics (150, 250 Hz...) of the 50 Hz heart sounds, which a phone speaker can play. */
-export function speakerBoost(x: Float32Array, drive = 3): Float32Array {
-  const norm = Math.tanh(drive);
-  const out = new Float32Array(x.length);
-  for (let i = 0; i < x.length; i++) out[i] = Math.tanh(drive * x[i]) / norm;
-  return out;
 }
 
 /**
@@ -144,28 +138,39 @@ export class LiveListener {
   }
 }
 
-/** One second of a 440 Hz tone, to tell a sound-output problem from a signal problem. */
-export async function playTestTone(): Promise<void> {
-  await acquireSession();
-  const ctx = new AudioContext();
+/** One second of 440 Hz through the Web Audio engine. Returns what happened, for the screen. */
+export async function playTestTone(): Promise<string> {
+  let stage = 'starting the audio session';
   try {
-    if (ctx.state !== 'running') await ctx.resume().catch(() => undefined);
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.frequency.value = 440;
-    const t = ctx.currentTime;
-    gain.gain.setValueAtTime(0, t);
-    gain.gain.linearRampToValueAtTime(0.4, t + 0.05);
-    gain.gain.setValueAtTime(0.4, t + 0.9);
-    gain.gain.linearRampToValueAtTime(0, t + 1.0);
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.start(t);
-    osc.stop(t + 1.05);
-    await new Promise((r) => setTimeout(r, 1200));
-  } finally {
-    await ctx.close().catch(() => undefined);
-    await releaseSession();
+    await acquireSession();
+    stage = 'creating the audio engine';
+    const ctx = new AudioContext();
+    try {
+      stage = 'resuming the audio engine';
+      if (ctx.state !== 'running') await ctx.resume();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.frequency.value = 440;
+      const t = ctx.currentTime;
+      gain.gain.setValueAtTime(0, t);
+      gain.gain.linearRampToValueAtTime(0.4, t + 0.05);
+      gain.gain.setValueAtTime(0.4, t + 0.9);
+      gain.gain.linearRampToValueAtTime(0, t + 1.0);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      stage = 'playing';
+      osc.start(t);
+      osc.stop(t + 1.05);
+      const t0 = ctx.currentTime;
+      await new Promise((r) => setTimeout(r, 1200));
+      const advanced = ctx.currentTime - t0;
+      return `Web Audio engine ${ctx.state} at ${ctx.sampleRate} Hz; its clock moved ${advanced.toFixed(2)} s in 1.2 s.`;
+    } finally {
+      await ctx.close().catch(() => undefined);
+      await releaseSession();
+    }
+  } catch (e) {
+    return `Web Audio failed while ${stage}: ${String((e as Error).message ?? e)}`;
   }
 }
 

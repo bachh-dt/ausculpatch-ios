@@ -107,6 +107,16 @@ export function SettingsScreen({ go }: { go: (route: 'developer' | 'download') =
       <Group>
         <ListRow title="Export history as CSV" subtitle="Heart rate, breathing and steps per minute" onPress={exportHistory} chevron />
         <ListRow title="Storage used" right={<Text style={{ fontSize: 14, color: colors.muted }}>{bytes(used)}</Text>} />
+        <ListRow
+          title="Delete history"
+          subtitle="Clears Trends: heart rate, breathing, steps and falls. Recordings stay."
+          onPress={() =>
+            Alert.alert('Delete all history?', 'Trends will start again from now. Recordings are not deleted. This cannot be undone.', [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Delete', style: 'destructive', onPress: () => history.clear() },
+            ])
+          }
+        />
       </Group>
 
       <Pressable

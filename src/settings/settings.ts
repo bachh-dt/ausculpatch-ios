@@ -13,6 +13,14 @@ export interface BandSetting {
   order: number;
 }
 
+export interface TraceVisibility {
+  heart: boolean;
+  ecg: boolean;
+  breath: boolean;
+  scg: boolean;
+  accel: boolean;
+}
+
 export interface Settings {
   windowS: WindowS;
   heartBand: BandSetting;
@@ -26,8 +34,12 @@ export interface Settings {
   /** IMU axis used for the seismocardiogram, or 'auto' for the one with the strongest beat. */
   scgAxis: 'auto' | 'x' | 'y' | 'z';
   listenVolume: number; // 0..1
+  /** 'ios': Apple's player, about 1 s behind. 'web': Web Audio engine, lower delay. */
+  audioEngine: 'ios' | 'web';
   traceFps: 15 | 30 | 60;
   showRaw: boolean;
+  /** Which live traces Home (and the Developer preview) show. */
+  traces: TraceVisibility;
   fallAlerts: boolean;
   fallSensitivity: FallSensitivity;
   stepGoal: number;
@@ -48,8 +60,10 @@ export const DEFAULT_SETTINGS: Settings = {
   listenBand: 'heart',
   scgAxis: 'auto',
   listenVolume: 0.8,
+  audioEngine: 'ios',
   traceFps: 30,
   showRaw: false,
+  traces: { heart: true, ecg: true, breath: true, scg: false, accel: false },
   fallAlerts: true,
   fallSensitivity: 'normal',
   stepGoal: 8000,
@@ -86,7 +100,14 @@ export function mergeSettings(stored: unknown): Settings {
     const v = src[key];
     const d = out[key];
     if (v === undefined || v === null) continue;
-    if (typeof d === 'object') {
+    if (key === 'traces') {
+      if (typeof v === 'object') {
+        const t = v as Record<string, unknown>;
+        for (const k of Object.keys(out.traces) as (keyof TraceVisibility)[]) {
+          if (typeof t[k] === 'boolean') out.traces[k] = t[k] as boolean;
+        }
+      }
+    } else if (typeof d === 'object') {
       const band = v as Partial<BandSetting>;
       if (
         typeof band.lowHz === 'number' &&
@@ -105,6 +126,7 @@ export function mergeSettings(stored: unknown): Settings {
   if (![15, 30, 60].includes(out.traceFps)) out.traceFps = DEFAULT_SETTINGS.traceFps;
   if (!['auto', 'x', 'y', 'z'].includes(out.scgAxis)) out.scgAxis = 'auto';
   if (!['heart', 'wide'].includes(out.listenBand)) out.listenBand = 'heart';
+  if (!['ios', 'web'].includes(out.audioEngine)) out.audioEngine = 'ios';
   if (!['low', 'normal', 'high'].includes(out.fallSensitivity)) out.fallSensitivity = 'normal';
   if (out.breathLowHz < 0 || out.breathLowHz >= out.breathCutHz) out.breathLowHz = 0;
   return out;

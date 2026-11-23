@@ -47,7 +47,13 @@
         "expo-notifications",
         {}
       ],
-      "expo-sqlite"
+      "expo-sqlite",
+      [
+        "expo-audio",
+        {
+          "microphonePermission": false
+        }
+      ]
     ]
   }
 }

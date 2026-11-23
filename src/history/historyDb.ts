@@ -4,7 +4,8 @@
  * patch downloads both write here, so Trends shows both.
  */
 import { openDatabaseSync, SQLiteDatabase } from 'expo-sqlite';
-import { binRows, Bin, MinuteAccumulator, MinuteRow, Period, periodRange } from './aggregate';
+import { binRows, Bin, MinuteAccumulator, mergeRows, MinuteRow, Period, periodRange } from './aggregate';
+import { MinuteVitals } from './minuteVitals';
 
 export interface HistoryEvent {
   id: number;
@@ -25,11 +26,20 @@ interface DbRow {
   br_sum: number;
   br_n: number;
   steps: number;
+  v: number;
 }
+
+/**
+ * Version 2 stores per-minute heart rate from checked beats. Heart rate and
+ * breathing saved by version 1 (single 2-second estimates, which let through
+ * values like 30 and 188 bpm) are kept in the file but no longer shown.
+ */
+const METHOD = 2;
 
 export class History {
   private db: SQLiteDatabase;
   readonly live = new MinuteAccumulator();
+  readonly vitals = new MinuteVitals();
   private flushTimer: ReturnType<typeof setInterval> | null = null;
   private listeners = new Set<() => void>();
   version = 0;
@@ -50,6 +60,12 @@ export class History {
       );
       CREATE INDEX IF NOT EXISTS events_time ON events(time);
     `);
+    const ver = this.db.getFirstSync<{ user_version: number }>('PRAGMA user_version')?.user_version ?? 0;
+    if (ver < 2) {
+      const cols = this.db.getAllSync<{ name: string }>('PRAGMA table_info(minutes)');
+      if (!cols.some((c) => c.name === 'v')) this.db.execSync('ALTER TABLE minutes ADD COLUMN v INTEGER NOT NULL DEFAULT 1');
+      this.db.execSync('PRAGMA user_version = 2');
+    }
   }
 
   subscribe(fn: () => void): () => void {
@@ -68,8 +84,23 @@ export class History {
   }
 
   flushLive(all: boolean): void {
-    const rows = this.live.drain(all ? undefined : Date.now());
+    // A minute's vitals are only judged once the minute is over (or the app pauses).
+    const cut = all ? undefined : Date.now();
+    const byMinute = new Map<number, MinuteRow>();
+    for (const r of [...this.live.drain(cut), ...this.vitals.drain(cut)]) {
+      const prev = byMinute.get(r.minute);
+      byMinute.set(r.minute, prev ? mergeRows(prev, r) : r);
+    }
+    const rows = [...byMinute.values()];
     if (rows.length) this.saveRows(rows);
+  }
+
+  /** Deletes every saved minute and event. */
+  clear(): void {
+    this.live.drain();
+    this.vitals.drain();
+    this.db.execSync('DELETE FROM minutes; DELETE FROM events;');
+    this.changed();
   }
 
   saveRows(rows: MinuteRow[]): void {
@@ -77,8 +108,8 @@ export class History {
     this.db.withTransactionSync(() => {
       for (const r of rows) {
         this.db.runSync(
-          `INSERT INTO minutes (minute, hr_min, hr_max, hr_sum, hr_n, br_min, br_max, br_sum, br_n, steps)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `INSERT INTO minutes (minute, hr_min, hr_max, hr_sum, hr_n, br_min, br_max, br_sum, br_n, steps, v)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${METHOD})
            ON CONFLICT(minute) DO UPDATE SET
              hr_min = CASE WHEN hr_min IS NULL THEN excluded.hr_min WHEN excluded.hr_min IS NULL THEN hr_min ELSE MIN(hr_min, excluded.hr_min) END,
              hr_max = CASE WHEN hr_max IS NULL THEN excluded.hr_max WHEN excluded.hr_max IS NULL THEN hr_max ELSE MAX(hr_max, excluded.hr_max) END,
@@ -86,7 +117,8 @@ export class History {
              br_min = CASE WHEN br_min IS NULL THEN excluded.br_min WHEN excluded.br_min IS NULL THEN br_min ELSE MIN(br_min, excluded.br_min) END,
              br_max = CASE WHEN br_max IS NULL THEN excluded.br_max WHEN excluded.br_max IS NULL THEN br_max ELSE MAX(br_max, excluded.br_max) END,
              br_sum = br_sum + excluded.br_sum, br_n = br_n + excluded.br_n,
-             steps = steps + excluded.steps`,
+             steps = steps + excluded.steps,
+             v = ${METHOD}`,
           [r.minute, r.hrMin, r.hrMax, r.hrSum, r.hrN, r.brMin, r.brMax, r.brSum, r.brN, r.steps],
         );
       }
@@ -99,18 +131,21 @@ export class History {
       'SELECT * FROM minutes WHERE minute >= ? AND minute < ? ORDER BY minute',
       [Math.floor(fromMs / 60000), Math.ceil(toMs / 60000)],
     );
-    const saved = rows.map((r) => ({
-      minute: r.minute,
-      hrMin: r.hr_min,
-      hrMax: r.hr_max,
-      hrSum: r.hr_sum,
-      hrN: r.hr_n,
-      brMin: r.br_min,
-      brMax: r.br_max,
-      brSum: r.br_sum,
-      brN: r.br_n,
-      steps: r.steps,
-    }));
+    const saved = rows.map((r) => {
+      const ok = r.v >= METHOD;
+      return {
+        minute: r.minute,
+        hrMin: ok ? r.hr_min : null,
+        hrMax: ok ? r.hr_max : null,
+        hrSum: ok ? r.hr_sum : 0,
+        hrN: ok ? r.hr_n : 0,
+        brMin: ok ? r.br_min : null,
+        brMax: ok ? r.br_max : null,
+        brSum: ok ? r.br_sum : 0,
+        brN: ok ? r.br_n : 0,
+        steps: r.steps,
+      };
+    });
     const pending = this.live.pending().filter((r) => r.minute * 60000 >= fromMs && r.minute * 60000 < toMs);
     return [...saved, ...pending];
   }
@@ -141,6 +176,10 @@ export class History {
     const lines = ['time_utc,heart_rate_min,heart_rate_mean,heart_rate_max,breathing_min,breathing_mean,breathing_max,steps'];
     const f = (v: number | null) => (v === null ? '' : v.toFixed(1));
     for (const r of rows) {
+      if (r.v < METHOD) {
+        r.hr_min = r.hr_max = r.br_min = r.br_max = null;
+        r.hr_n = r.br_n = 0;
+      }
       lines.push(
         [
           new Date(r.minute * 60000).toISOString(),

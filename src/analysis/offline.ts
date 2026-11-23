@@ -11,14 +11,15 @@ import * as P from '../protocol/protocol';
 import { FlashSample } from '../protocol/flashlog';
 import { imuToEngineeringUnits } from '../protocol/decode';
 import { BlockMeanDecimator, StreamingFilter } from '../dsp/filters';
-import { estimateHeartRate, estimateRateFromWave, RR_MAX_BPM, RR_MIN_BPM } from '../dsp/vitals';
+import { estimateRateFromWave, RR_MAX_BPM, RR_MIN_BPM } from '../dsp/vitals';
 import { ecgQuality, heartSoundQuality } from '../dsp/quality';
 import { FallDetector, FallEvent, StepCounter } from '../dsp/motion';
-import { MinuteAccumulator, MinuteRow } from '../history/aggregate';
+import { MinuteAccumulator, mergeRows, MinuteRow } from '../history/aggregate';
+import { MinuteVitals } from '../history/minuteVitals';
+import { HeartRateTracker } from '../dsp/hrtrack';
 import { breathSpec, ecgSpec, heartSpec, Settings } from '../settings/settings';
 
-const EVAL_EVERY_S = 10;
-const HR_WINDOW_S = 20;
+const EVAL_EVERY_S = 5;
 const BR_WINDOW_S = 30;
 const Q_WINDOW_S = 8;
 const GAP_S = 1;
@@ -41,6 +42,14 @@ class Window {
       this.v = this.v.slice(this.start);
       this.start = 0;
     }
+  }
+  /** Times and values of the last `spanS` seconds. */
+  slice(spanS = this.spanS): [Float64Array, Float64Array] {
+    if (this.t.length === this.start) return [new Float64Array(0), new Float64Array(0)];
+    const cut = this.t[this.t.length - 1] - spanS;
+    let i = this.start;
+    while (i < this.t.length && this.t[i] < cut) i++;
+    return [Float64Array.from(this.t.slice(i)), Float64Array.from(this.v.slice(i))];
   }
   values(spanS = this.spanS): Float64Array {
     if (this.t.length === this.start) return new Float64Array(0);
@@ -97,6 +106,8 @@ export interface OfflineResult {
 
 export class OfflineAnalyzer {
   private acc = new MinuteAccumulator();
+  private vitals = new MinuteVitals();
+  private hr = new HeartRateTracker();
   private falls: (FallEvent & { epochMs: number })[] = [];
   private ecg: Chunker;
   private aco: Chunker;
@@ -109,7 +120,7 @@ export class OfflineAnalyzer {
   private steps = new StepCounter();
   private fallDetector: FallDetector;
 
-  private ecgRaw = new Window(HR_WINDOW_S);
+  private ecgRaw = new Window(Q_WINDOW_S);
   private ecgFilt = new Window(Q_WINDOW_S);
   private acoRaw = new Window(Q_WINDOW_S);
   private heart = new Window(Q_WINDOW_S);
@@ -161,6 +172,7 @@ export class OfflineAnalyzer {
 
   private resetEcg(): void {
     this.ecgFilter.reset();
+    this.hr.breakChain();
     this.ecgRaw.clear();
     this.ecgFilt.clear();
   }
@@ -198,22 +210,27 @@ export class OfflineAnalyzer {
   }
 
   private evaluate(t: number): void {
-    let hr: number | null = null;
-    let br: number | null = null;
     const ecgFs = this.ecg.fs;
     if (ecgFs > 0) {
-      const raw = this.ecgRaw.values();
-      const q = ecgQuality(this.ecgRaw.values(Q_WINDOW_S), this.ecgFilt.values(), ecgFs);
-      if (q.level === 'good' && raw.length) hr = estimateHeartRate(raw, ecgFs);
+      const [ft, fv] = this.ecgFilt.slice(Q_WINDOW_S);
+      const [, rv] = this.ecgRaw.slice(Q_WINDOW_S);
+      if (ft.length > ecgFs * 4) {
+        const q = ecgQuality(rv, fv, ecgFs);
+        if (q.level === 'good') {
+          const span = ft[ft.length - 1] - ft[0];
+          const beats = q.beats.filter((b) => b <= span - 0.1).map((b) => ft[0] + b);
+          for (const a of this.hr.addBeats(beats, true)) this.vitals.addBeat(a.t * 1000, a.rr);
+        } else if (q.level !== 'unknown') this.hr.breakChain();
+      }
     }
     const acoFs = this.aco.fs;
     if (acoFs > 0) {
       const q = heartSoundQuality(this.acoRaw.values(), this.heart.values(), acoFs);
       if (q.level === 'good') {
-        br = estimateRateFromWave(this.breath.values(), this.decimator.outputRate(acoFs), RR_MIN_BPM, RR_MAX_BPM, 12);
+        const br = estimateRateFromWave(this.breath.values(), this.decimator.outputRate(acoFs), RR_MIN_BPM, RR_MAX_BPM, 12);
+        if (br !== null) this.vitals.addBreath(t * 1000, br);
       }
     }
-    if (hr !== null || br !== null) this.acc.addVitals(t * 1000, hr, br);
   }
 
   finish(): OfflineResult {
@@ -221,8 +238,13 @@ export class OfflineAnalyzer {
     if (this.aco.t.length > 1) this.flushAco();
     if (this.imu.t.length > 1) this.flushImu();
     if (this.lastT !== null) this.evaluate(this.lastT);
+    const byMinute = new Map<number, MinuteRow>();
+    for (const r of [...this.acc.drain(), ...this.vitals.drain()]) {
+      const prev = byMinute.get(r.minute);
+      byMinute.set(r.minute, prev ? mergeRows(prev, r) : r);
+    }
     return {
-      rows: this.acc.drain(),
+      rows: [...byMinute.values()].sort((a, b) => a.minute - b.minute),
       falls: this.falls,
       firstEpochMs: this.first === null ? null : this.first * 1000,
       lastEpochMs: this.lastT === null ? null : this.lastT * 1000,
